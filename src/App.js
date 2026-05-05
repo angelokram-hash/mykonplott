@@ -647,7 +647,7 @@ export default function App() {
       return;
     }
 
-    const url = `${KONAGENT_URL}/api/public/restocking/${kundeId}`;
+    const url = `${KONAGENT_URL}/api/public/restocking/${kundeId}?t=${Date.now()}`;
     fetch(url)
       .then(res => {
         if (!res.ok) throw new Error(res.status === 404 ? 'not_found' : `HTTP ${res.status}`);
