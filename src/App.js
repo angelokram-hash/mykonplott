@@ -546,18 +546,34 @@ function KollektionCard({ name, preview, onClick, byKollektion }) {
   );
 }
 
-function CollectionOverview({ catalog, kundeName, geaendert, onSelect }) {
+function CollectionOverview({ catalog, kundeName, geaendert, onSelect, vertreterKontakt }) {
   const date = geaendert ? new Date(geaendert).toLocaleDateString('de-DE') : null;
 
   return (
     <div className="min-h-screen bg-[#faf9f6]">
       <header className="glass border-b border-champagne-200/40 px-5 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div>
+          <div className="flex-1">
             <p className="text-[10px] font-semibold tracking-[0.15em] text-champagne-400 uppercase mb-0.5">myKONPLOTT</p>
             <h1 className="font-display text-xl text-champagne-800 tracking-wide">{kundeName}</h1>
             {date && <p className="text-[10px] text-champagne-400 mt-0.5">Aktualisiert {date}</p>}
           </div>
+          {vertreterKontakt && (
+            <div className="text-right flex items-center gap-3">
+              {vertreterKontakt.bild && (
+                <img src={vertreterKontakt.bild} alt={vertreterKontakt.name} className="w-10 h-10 rounded-full object-cover" />
+              )}
+              <div>
+                <p className="text-[10px] font-semibold tracking-[0.15em] text-champagne-400 uppercase mb-0.5">Ihr Vertreter</p>
+                <p className="text-sm text-champagne-800 font-medium">{vertreterKontakt.name}</p>
+                {vertreterKontakt.whatsapp && (
+                  <a href={`https://wa.me/${vertreterKontakt.whatsapp.replace(/[^0-9+]/g, '')}`} target="_blank" rel="noopener" className="text-[10px] text-champagne-600 hover:text-champagne-800">
+                    WhatsApp
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
@@ -715,6 +731,7 @@ export default function App() {
       kundeName={kundeName}
       geaendert={geaendert}
       onSelect={setSelectedKollektion}
+      vertreterKontakt={vertreterKontakt}
     />
   );
 }
