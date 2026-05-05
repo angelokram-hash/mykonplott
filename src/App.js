@@ -567,7 +567,7 @@ function CollectionOverview({ catalog, kundeName, geaendert, onSelect, vertreter
                 <p className="text-[10px] font-semibold tracking-[0.15em] text-champagne-400 uppercase mb-0.5">Ihr Vertreter</p>
                 <p className="text-sm text-champagne-800 font-medium">{vertreterKontakt.name}</p>
                 {vertreterKontakt.whatsapp && (
-                  <a href={`https://wa.me/${vertreterKontakt.whatsapp.replace(/[^0-9+]/g, '')}`} target="_blank" rel="noopener" className="text-[10px] text-champagne-600 hover:text-champagne-800">
+                  <a href={`https://wa.me/${vertreterKontakt.whatsapp.replace(/[^0-9+]/g, '')}`} target="_blank" rel="noopener noreferrer" className="text-[10px] text-champagne-600 hover:text-champagne-800">
                     WhatsApp
                   </a>
                 )}
