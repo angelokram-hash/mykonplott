@@ -396,7 +396,7 @@ function ImageCell({ cell, allCells, onAddCart, cartOpen }) {
 
 const CELL_SIZES = [120, 150, 180, 220, 260];
 
-function KollektionView({ kollektion, onBack, catalog, kundeName, cart, onAddCart, cartOpen, onCartClose, vertreterKontakt }) {
+function KollektionView({ kollektion, onBack, catalog, kundeName, cart, onAddCart, cartOpen, onCartOpen, onCartClose, vertreterKontakt }) {
   const [sizeIdx, setSizeIdx] = useState(2);
   const [viewMode, setViewMode] = useState('tabelle');
 
@@ -698,6 +698,7 @@ export default function App() {
         cart={cart}
         onAddCart={handleAddCart}
         cartOpen={cartOpen}
+        onCartOpen={() => setCartOpen(true)}
         onCartClose={() => setCartOpen(false)}
         vertreterKontakt={vertreterKontakt}
       />
