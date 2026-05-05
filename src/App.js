@@ -654,7 +654,6 @@ export default function App() {
         return res.json();
       })
       .then(data => {
-        console.log('Restocking API response - kundeName:', data.kundeName, 'vertreterName:', data.vertreterName, 'type:', typeof data.vertreterName);
         setKundeName(data.kundeName || kundeId);
         setGeaendert(data.geaendert);
         setVertreterName(data.vertreterName || '');
@@ -674,14 +673,8 @@ export default function App() {
         const res = await fetch(`${KONAGENT_URL}/api/public/vertreter`);
         if (!res.ok) return;
         const kontakte = await res.json();
-        console.log('Vertreter kontakte fetched count:', kontakte.length, 'gebiete:', kontakte.map(k => k.gebiet).join(', '));
-        console.log('Looking for vertreter with gebiet:', vertreterName, 'type:', typeof vertreterName, 'length:', vertreterName?.length);
         // Find vertreter matching customer's vertreterName
-        const vertreter = kontakte.find(k => {
-          console.log('Comparing:', JSON.stringify(k.gebiet), '===', JSON.stringify(vertreterName), '=', k.gebiet === vertreterName);
-          return k.gebiet === vertreterName;
-        });
-        console.log('Found vertreter match:', vertreter ? vertreter.name : 'NOT FOUND');
+        const vertreter = kontakte.find(k => k.gebiet === vertreterName);
         if (vertreter) {
           setVertreterKontakt(vertreter);
         }
