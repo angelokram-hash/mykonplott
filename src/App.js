@@ -4,8 +4,6 @@ import { useState, useEffect } from 'react';
 const KONAGENT_URL = process.env.REACT_APP_KONAGENT_URL || 'https://kon-agent.vercel.app';
 const CDN_BASE = 'https://konplott-cdn.com/mytism/image';
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 function imgUrl(id, size) {
   if (!id) return null;
   return `${CDN_BASE}/${id}/${id}.jpg?width=${size}&height=${size}&box=true`;
@@ -20,7 +18,6 @@ function fmtPrice(v) {
   return v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
 }
 
-// Convert flat ArtikelListeItem[] → catalog structure KonCatalog expects
 function buildCatalog(artikel) {
   const cells = artikel.map(a => ({
     sku: a.ean,
@@ -33,7 +30,6 @@ function buildCatalog(artikel) {
     images: a.vorschaubildId ? [a.vorschaubildId] : [],
   }));
 
-  // Collect kollektionen in sorted order
   const kollOrder = [];
   const kollSeen = new Set();
   cells.forEach(c => {
@@ -45,7 +41,6 @@ function buildCatalog(artikel) {
   kollOrder.forEach(k => { byKollektion[k] = []; });
   cells.forEach(c => { byKollektion[c.kollektion].push(c); });
 
-  // Sort each kollektion: subkollektion asc, then price desc
   Object.values(byKollektion).forEach(arr => {
     arr.sort((a, b) => {
       const sc = a.subkollektion.localeCompare(b.subkollektion, 'de');
@@ -54,7 +49,6 @@ function buildCatalog(artikel) {
     });
   });
 
-  // Preview image: first item per kollektion with an imageId
   const kollektionPreviews = {};
   kollOrder.forEach(k => {
     const first = byKollektion[k].find(c => c.imageId);
@@ -64,7 +58,6 @@ function buildCatalog(artikel) {
   return { kollektionen: kollOrder, byKollektion, kollektionPreviews, cells };
 }
 
-// Build matrix: rows = unique form×price combos, subkollektionen = color columns
 function buildMatrix(byKollektion, kollektion) {
   const kcells = byKollektion[kollektion] || [];
   const subkolOrder = [];
@@ -88,13 +81,9 @@ function buildMatrix(byKollektion, kollektion) {
   return { rows, subkollektionen: subkolOrder, lookup };
 }
 
-// ─── Loading skeleton ─────────────────────────────────────────────────────────
-
 function Skeleton({ className }) {
   return <div className={`bg-champagne-100 rounded-xl animate-shimmer ${className}`} />;
 }
-
-// ─── Not Found / Error ────────────────────────────────────────────────────────
 
 function NotFound({ message }) {
   return (
@@ -111,10 +100,417 @@ function NotFound({ message }) {
   );
 }
 
-// ─── Kollektion Card ──────────────────────────────────────────────────────────
+// ─── Variants Modal ──────────────────────────────────────────────────────────
+
+function VariantsModal({ cell, allCells, onClose }) {
+  const [variants, setVariants] = useState([]);
+  const [loaded, setLoaded] = useState(10);
+
+  useEffect(() => {
+    if (!cell) return;
+    const matches = allCells.filter(c =>
+      c.kollektion === cell.kollektion &&
+      c.form === cell.form &&
+      Math.abs(c.price - cell.price) <= cell.price * 0.1 &&
+      c.sku !== cell.sku
+    );
+    setVariants(matches);
+  }, [cell, allCells]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50">
+      <div className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl max-h-[80vh] overflow-hidden flex flex-col">
+        <div className="sticky top-0 bg-white border-b border-champagne-200/40 px-5 py-3.5 flex items-center justify-between">
+          <h2 className="font-display text-lg text-champagne-800">Varianten</h2>
+          <button onClick={onClose} className="text-champagne-400 hover:text-champagne-700">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 p-4">
+          <div className="grid gap-2">
+            {variants.slice(0, loaded).map(v => (
+              <a
+                key={v.sku}
+                href={goUrl(v.sku)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex gap-3 p-3 bg-champagne-50 hover:bg-champagne-100 rounded-lg border border-champagne-200/40 transition-all"
+              >
+                {v.imageId && (
+                  <img src={imgUrl(v.imageId, 120)} alt="" className="w-20 h-20 object-cover rounded" />
+                )}
+                <div className="flex-1">
+                  <p className="font-semibold text-champagne-800 text-sm">{v.form}</p>
+                  <p className="text-xs text-champagne-600">{v.subkollektion}</p>
+                  <p className="text-sm font-bold text-champagne-700 mt-1">{fmtPrice(v.price)}</p>
+                </div>
+              </a>
+            ))}
+          </div>
+
+          {loaded < variants.length && (
+            <button
+              onClick={() => setLoaded(l => l + 10)}
+              className="w-full mt-4 px-4 py-2 bg-champagne-700 text-white rounded-lg hover:bg-champagne-800 text-sm"
+            >
+              {variants.length - loaded} weitere Varianten laden
+            </button>
+          )}
+
+          {variants.length === 0 && (
+            <p className="text-center text-champagne-500 text-sm py-6">Keine Varianten gefunden</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Set Complements Modal ──────────────────────────────────────────────────
+
+function SetComplementsModal({ cell, allCells, onClose }) {
+  const [complements, setComplements] = useState([]);
+  const [loaded, setLoaded] = useState(10);
+
+  useEffect(() => {
+    if (!cell) return;
+    const matches = allCells.filter(c => c.sku !== cell.sku);
+    setComplements(matches);
+  }, [cell, allCells]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50">
+      <div className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl max-h-[80vh] overflow-hidden flex flex-col">
+        <div className="sticky top-0 bg-white border-b border-champagne-200/40 px-5 py-3.5 flex items-center justify-between">
+          <h2 className="font-display text-lg text-champagne-800">Setergänzung</h2>
+          <button onClick={onClose} className="text-champagne-400 hover:text-champagne-700">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 p-4">
+          <div className="grid gap-2">
+            {complements.slice(0, loaded).map(c => (
+              <a
+                key={c.sku}
+                href={goUrl(c.sku)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex gap-3 p-3 bg-champagne-50 hover:bg-champagne-100 rounded-lg border border-champagne-200/40 transition-all"
+              >
+                {c.imageId && (
+                  <img src={imgUrl(c.imageId, 120)} alt="" className="w-20 h-20 object-cover rounded" />
+                )}
+                <div className="flex-1">
+                  <p className="font-semibold text-champagne-800 text-sm">{c.kollektion}</p>
+                  <p className="text-xs text-champagne-600">{c.form} · {c.subkollektion}</p>
+                  <p className="text-sm font-bold text-champagne-700 mt-1">{fmtPrice(c.price)}</p>
+                </div>
+              </a>
+            ))}
+          </div>
+
+          {loaded < complements.length && (
+            <button
+              onClick={() => setLoaded(l => l + 10)}
+              className="w-full mt-4 px-4 py-2 bg-champagne-700 text-white rounded-lg hover:bg-champagne-800 text-sm"
+            >
+              {complements.length - loaded} weitere Artikel laden
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Cart View Modal ────────────────────────────────────────────────────────
+
+function CartView({ cartItems, onClose, vertreterKontakt, kundeName }) {
+  if (cartItems.length === 0) {
+    return null;
+  }
+
+  const handleWhatsApp = () => {
+    if (!vertreterKontakt?.whatsapp) return;
+
+    const message = `Hallo ${vertreterKontakt.name},\n\nanbei meine Restocking-Selektion:\n\n${cartItems.map(item => `${item.qty}x | ${item.sku} | ${item.form}`).join('\n')}\n\nLiebe Grüße`;
+    const waLink = `https://wa.me/${vertreterKontakt.whatsapp.replace(/[^0-9+]/g, '')}?text=${encodeURIComponent(message)}`;
+    window.open(waLink, '_blank');
+  };
+
+  const handleCopy = () => {
+    const text = cartItems.map(item => `${item.qty}x | ${item.sku} | ${item.form}`).join('\n');
+    navigator.clipboard.writeText(text);
+  };
+
+  const handleExportCSV = () => {
+    const csv = ['SKU,Form,Menge'].concat(cartItems.map(item => `${item.sku},${item.form},${item.qty}`)).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `restocking-${kundeName}-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50">
+      <div className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl max-h-[80vh] overflow-hidden flex flex-col">
+        <div className="sticky top-0 bg-white border-b border-champagne-200/40 px-5 py-3.5 flex items-center justify-between">
+          <h2 className="font-display text-lg text-champagne-800">Warenkorb ({cartItems.length})</h2>
+          <button onClick={onClose} className="text-champagne-400 hover:text-champagne-700">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 p-4">
+          <div className="grid gap-2 mb-4">
+            {cartItems.map(item => (
+              <div key={item.sku} className="flex gap-2 p-3 bg-champagne-50 rounded-lg border border-champagne-200/40">
+                <div className="flex-1">
+                  <p className="font-semibold text-champagne-800 text-sm">{item.form}</p>
+                  <p className="text-xs text-champagne-600">{item.sku}</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-bold text-champagne-700 text-sm">{item.qty}x</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="sticky bottom-0 bg-white border-t border-champagne-200/40 p-4 space-y-2">
+          {vertreterKontakt && (
+            <button
+              onClick={handleWhatsApp}
+              className="w-full px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all flex items-center justify-center gap-2"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.67-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.076 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421-7.403h-.004a9.87 9.87 0 00-4.94 1.298c-.504.282-.973.664-1.364 1.118l-1.852-1.852a1.375 1.375 0 10-1.946 1.946l1.852 1.852c-.454.391-.836.86-1.118 1.364a9.87 9.87 0 001.298 4.94 9.87 9.87 0 008.23 4.858c1.67 0 3.27-.417 4.67-1.15l1.852 1.852a1.375 1.375 0 101.946-1.946l-1.852-1.852c.454-.391.836-.86 1.118-1.364a9.87 9.87 0 00-1.298-4.94 9.87 9.87 0 00-8.23-4.858z"/>
+              </svg>
+              WhatsApp an {vertreterKontakt.name}
+            </button>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleCopy}
+              className="flex-1 px-4 py-2 bg-champagne-700 text-white rounded-lg hover:bg-champagne-800 text-sm font-semibold transition-all"
+            >
+              Kopieren
+            </button>
+            <button
+              onClick={handleExportCSV}
+              className="flex-1 px-4 py-2 bg-champagne-200 text-champagne-800 rounded-lg hover:bg-champagne-300 text-sm font-semibold transition-all"
+            >
+              CSV Export
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Image Cell with Buttons ─────────────────────────────────────────────────
+
+function ImageCell({ cell, allCells, onAddCart, cartOpen }) {
+  const img = cell?.imageId ? imgUrl(cell.imageId, 600) : null;
+  const [showVariants, setShowVariants] = useState(false);
+  const [showComplements, setShowComplements] = useState(false);
+
+  if (!cell) {
+    return <div className="w-full bg-champagne-50/40 rounded-xl border border-champagne-100/50" style={{ aspectRatio: '1' }} />;
+  }
+
+  const price = fmtPrice(cell.price);
+
+  return (
+    <>
+      <div className="relative group">
+        <a
+          href={goUrl(cell.sku)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block w-full overflow-hidden bg-champagne-50/50 rounded-xl border-2 border-champagne-100/60 hover:border-champagne-300 hover:shadow-lg transition-all duration-300 active:scale-[0.97]"
+          style={{ aspectRatio: '1' }}
+        >
+          {img ? (
+            <img src={img} alt="" className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105" loading="lazy" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-champagne-200">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" strokeWidth="1.5"/>
+                <circle cx="9" cy="9" r="2" stroke="currentColor" strokeWidth="1.5"/>
+                <path d="M3 16l5-4 4 3 3-2.5 6 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+          )}
+        </a>
+
+        {price && (
+          <div className="absolute bottom-1.5 left-1.5 bg-white/90 backdrop-blur-sm text-champagne-800 text-[10px] font-bold px-2 py-0.5 rounded-lg shadow-sm border border-champagne-200/50">
+            {price}
+          </div>
+        )}
+      </div>
+
+      {/* Buttons below */}
+      <div className="flex gap-1 mt-2 flex-wrap">
+        <button
+          onClick={() => setShowVariants(true)}
+          className="flex-1 min-w-[60px] px-2 py-1.5 text-xs font-semibold bg-champagne-700 text-white rounded-lg hover:bg-champagne-800 transition-all"
+        >
+          Variante
+        </button>
+        <button
+          onClick={() => setShowComplements(true)}
+          className="flex-1 min-w-[60px] px-2 py-1.5 text-xs font-semibold bg-champagne-200 text-champagne-800 rounded-lg hover:bg-champagne-300 transition-all"
+        >
+          Seterg.
+        </button>
+        <button
+          onClick={() => onAddCart(cell)}
+          className="flex-1 min-w-[80px] px-2 py-1.5 text-xs font-semibold bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all"
+        >
+          🛒 Korb
+        </button>
+      </div>
+
+      {showVariants && <VariantsModal cell={cell} allCells={allCells} onClose={() => setShowVariants(false)} />}
+      {showComplements && <SetComplementsModal cell={cell} allCells={allCells} onClose={() => setShowComplements(false)} />}
+    </>
+  );
+}
+
+// ─── Kollektion View ──────────────────────────────────────────────────────────
+
+const CELL_SIZES = [120, 150, 180, 220, 260];
+
+function KollektionView({ kollektion, onBack, catalog, kundeName, cart, onAddCart, cartOpen, onCartClose, vertreterKontakt }) {
+  const [sizeIdx, setSizeIdx] = useState(2);
+  const [viewMode, setViewMode] = useState('tabelle');
+
+  const { rows, subkollektionen, lookup } = buildMatrix(catalog.byKollektion, kollektion);
+  const allCells = catalog.cells;
+  const CELL_W = CELL_SIZES[sizeIdx];
+  const LABEL_W = 130;
+
+  return (
+    <div className="min-h-screen bg-[#faf9f6]">
+      <header className="sticky top-0 z-40 glass border-b border-champagne-200/40 px-5 py-3.5 flex items-center gap-3">
+        <button onClick={onBack} className="flex items-center gap-1.5 text-champagne-500 hover:text-champagne-700 transition-colors text-xs font-semibold shrink-0 group">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="group-hover:-translate-x-0.5 transition-transform">
+            <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Übersicht
+        </button>
+        <div className="w-px h-5" style={{ background: 'linear-gradient(to bottom, transparent, #d4c9b8, transparent)' }} />
+        <h1 className="font-display text-base text-champagne-800 truncate tracking-wide">{kollektion}</h1>
+        <div className="ml-auto flex items-center gap-1.5">
+          {cart.length > 0 && (
+            <button
+              onClick={onCartOpen}
+              className="relative px-3 py-1.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 text-xs font-semibold transition-all"
+            >
+              🛒 {cart.length}
+            </button>
+          )}
+          <div className="flex items-center bg-champagne-50 rounded-xl border border-champagne-200/60 overflow-hidden mr-1">
+            <button onClick={() => setViewMode('tabelle')} title="Matrix"
+              className={`p-1.5 transition-all ${viewMode === 'tabelle' ? 'bg-champagne-700 text-white' : 'text-champagne-400 hover:text-champagne-600'}`}>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <rect x="1" y="1" width="6" height="6"/><rect x="9" y="1" width="6" height="6"/><rect x="1" y="9" width="6" height="6"/><rect x="9" y="9" width="6" height="6"/>
+              </svg>
+            </button>
+            <button onClick={() => setViewMode('fliessend')} title="Fließend"
+              className={`p-1.5 transition-all ${viewMode === 'fliessend' ? 'bg-champagne-700 text-white' : 'text-champagne-400 hover:text-champagne-600'}`}>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <line x1="1" y1="3" x2="15" y2="3"/><line x1="1" y1="7" x2="15" y2="7"/><line x1="1" y1="11" x2="10" y2="11"/>
+              </svg>
+            </button>
+          </div>
+          <div className="flex items-center bg-champagne-50 rounded-xl border border-champagne-200/60 overflow-hidden">
+            <button onClick={() => setSizeIdx(i => Math.max(0, i - 1))} disabled={sizeIdx === 0}
+              className="p-1.5 text-champagne-400 hover:text-champagne-700 disabled:opacity-30 transition-all" title="Kleiner">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="7" x2="11" y2="7"/></svg>
+            </button>
+            <button onClick={() => setSizeIdx(i => Math.min(CELL_SIZES.length - 1, i + 1))} disabled={sizeIdx === CELL_SIZES.length - 1}
+              className="p-1.5 text-champagne-400 hover:text-champagne-700 disabled:opacity-30 transition-all" title="Größer">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="7" y1="3" x2="7" y2="11"/><line x1="3" y1="7" x2="11" y2="7"/></svg>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="px-4 py-6">
+        {viewMode === 'fliessend' ? (
+          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${CELL_W}px, 1fr))` }}>
+            {catalog.byKollektion[kollektion]?.map(cell => (
+              <div key={cell.sku}>
+                <ImageCell cell={cell} allCells={allCells} onAddCart={onAddCart} cartOpen={cartOpen} />
+                <div className="mt-1.5 px-0.5">
+                  <p className="text-[10px] font-semibold text-champagne-700 truncate">{cell.form}</p>
+                  <p className="text-[10px] text-champagne-500 truncate">{cell.subkollektion}</p>
+                </div>
+              </div>
+            )) || []}
+          </div>
+        ) : (
+          <div className="table-container">
+            <div style={{ minWidth: LABEL_W + subkollektionen.length * (CELL_W + 6) }}>
+              <div className="flex items-end gap-1.5 mb-2 pb-2 border-b border-champagne-200/60 sticky top-0 bg-[#faf9f6] z-10">
+                <div style={{ width: LABEL_W, minWidth: LABEL_W }} />
+                {subkollektionen.map(sub => (
+                  <div key={sub} style={{ width: CELL_W, minWidth: CELL_W }}
+                    className="text-[9px] font-semibold text-champagne-500 tracking-wide truncate text-center pb-1">
+                    {sub}
+                  </div>
+                ))}
+              </div>
+              {rows.map(row => {
+                const rowKey = `${row.price}|||${row.form}`;
+                return (
+                  <div key={rowKey} className="flex items-start gap-1.5 mb-1.5">
+                    <div style={{ width: LABEL_W, minWidth: LABEL_W }} className="pr-3 pt-1">
+                      <p className="text-[10px] font-semibold text-champagne-700 truncate">{row.form}</p>
+                      {row.price > 0 && (
+                        <p className="text-[9px] text-champagne-400">{fmtPrice(row.price)}</p>
+                      )}
+                    </div>
+                    {subkollektionen.map(sub => {
+                      const cell = lookup[`${row.price}|||${row.form}|||${sub}`] || null;
+                      return (
+                        <div key={sub} style={{ width: CELL_W, minWidth: CELL_W }}>
+                          <ImageCell cell={cell} allCells={allCells} onAddCart={onAddCart} cartOpen={cartOpen} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+      {cartOpen && <CartView cartItems={cart} onClose={onCartClose} vertreterKontakt={vertreterKontakt} kundeName={kundeName} />}
+      </main>
+    </div>
+  );
+}
+
+// ─── Collection Overview ──────────────────────────────────────────────────────
 
 function KollektionCard({ name, preview, onClick, byKollektion }) {
-  const img = preview?.image || null;
   const kcells = byKollektion[name] || [];
   const itemCount = kcells.length;
   const styles = new Set(kcells.map(c => c.form)).size;
@@ -124,8 +520,8 @@ function KollektionCard({ name, preview, onClick, byKollektion }) {
     <div className="group relative rounded-2xl overflow-hidden hover:shadow-[0_12px_40px_rgba(0,0,0,0.1)] transition-all duration-500 cursor-pointer bg-white border border-champagne-100/80 hover:border-champagne-300/60">
       <button onClick={() => onClick(name)} className="text-left w-full active:scale-[0.98] transition-transform duration-200">
         <div className="overflow-hidden aspect-square w-full bg-champagne-50 relative">
-          {img ? (
-            <img src={img} alt={name} className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110" loading="lazy" />
+          {preview?.image ? (
+            <img src={preview.image} alt={name} className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110" loading="lazy" />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-champagne-200">
               <svg width="40" height="40" viewBox="0 0 48 48" fill="none">
@@ -150,163 +546,6 @@ function KollektionCard({ name, preview, onClick, byKollektion }) {
   );
 }
 
-// ─── Image Cell ───────────────────────────────────────────────────────────────
-
-function ImageCell({ cell }) {
-  const img = cell?.imageId ? imgUrl(cell.imageId, 600) : null;
-
-  if (!cell) {
-    return <div className="w-full bg-champagne-50/40 rounded-xl border border-champagne-100/50" style={{ aspectRatio: '1' }} />;
-  }
-
-  const price = fmtPrice(cell.price);
-
-  return (
-    <div className="relative group">
-      <a
-        href={goUrl(cell.sku)}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="block w-full overflow-hidden bg-champagne-50/50 rounded-xl border-2 border-champagne-100/60 hover:border-champagne-300 hover:shadow-lg transition-all duration-300 active:scale-[0.97]"
-        style={{ aspectRatio: '1' }}
-        title={`${cell.form} · ${cell.subkollektion}${price ? ` · ${price}` : ''}`}
-      >
-        {img ? (
-          <img src={img} alt="" className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105" loading="lazy" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-champagne-200">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-              <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" strokeWidth="1.5"/>
-              <circle cx="9" cy="9" r="2" stroke="currentColor" strokeWidth="1.5"/>
-              <path d="M3 16l5-4 4 3 3-2.5 6 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </div>
-        )}
-      </a>
-
-      {price && (
-        <div className="absolute bottom-1.5 left-1.5 bg-white/90 backdrop-blur-sm text-champagne-800 text-[10px] font-bold px-2 py-0.5 rounded-lg shadow-sm border border-champagne-200/50">
-          {price}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Kollektion View ──────────────────────────────────────────────────────────
-
-const CELL_SIZES = [120, 150, 180, 220, 260];
-
-function KollektionView({ kollektion, onBack, catalog, kundeName }) {
-  const [sizeIdx, setSizeIdx] = useState(2);
-  const [viewMode, setViewMode] = useState('tabelle');
-
-  const { rows, subkollektionen, lookup } = buildMatrix(catalog.byKollektion, kollektion);
-  const allCells = catalog.byKollektion[kollektion] || [];
-  const CELL_W = CELL_SIZES[sizeIdx];
-  const LABEL_W = 130;
-
-  return (
-    <div className="min-h-screen bg-[#faf9f6]">
-      <header className="sticky top-0 z-40 glass border-b border-champagne-200/40 px-5 py-3.5 flex items-center gap-3">
-        <button onClick={onBack} className="flex items-center gap-1.5 text-champagne-500 hover:text-champagne-700 transition-colors text-xs font-semibold shrink-0 group">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="group-hover:-translate-x-0.5 transition-transform">
-            <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-          Übersicht
-        </button>
-        <div className="w-px h-5" style={{ background: 'linear-gradient(to bottom, transparent, #d4c9b8, transparent)' }} />
-        <h1 className="font-display text-base text-champagne-800 truncate tracking-wide">{kollektion}</h1>
-        <div className="ml-auto flex items-center gap-1.5">
-          {/* View toggle */}
-          <div className="flex items-center bg-champagne-50 rounded-xl border border-champagne-200/60 overflow-hidden mr-1">
-            <button onClick={() => setViewMode('tabelle')} title="Matrix"
-              className={`p-1.5 transition-all ${viewMode === 'tabelle' ? 'bg-champagne-700 text-white' : 'text-champagne-400 hover:text-champagne-600'}`}>
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <rect x="1" y="1" width="6" height="6"/><rect x="9" y="1" width="6" height="6"/><rect x="1" y="9" width="6" height="6"/><rect x="9" y="9" width="6" height="6"/>
-              </svg>
-            </button>
-            <button onClick={() => setViewMode('fliessend')} title="Fließend"
-              className={`p-1.5 transition-all ${viewMode === 'fliessend' ? 'bg-champagne-700 text-white' : 'text-champagne-400 hover:text-champagne-600'}`}>
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <line x1="1" y1="3" x2="15" y2="3"/><line x1="1" y1="7" x2="15" y2="7"/><line x1="1" y1="11" x2="10" y2="11"/>
-              </svg>
-            </button>
-          </div>
-          {/* Size controls */}
-          <div className="flex items-center bg-champagne-50 rounded-xl border border-champagne-200/60 overflow-hidden">
-            <button onClick={() => setSizeIdx(i => Math.max(0, i - 1))} disabled={sizeIdx === 0}
-              className="p-1.5 text-champagne-400 hover:text-champagne-700 disabled:opacity-30 transition-all" title="Kleiner">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="7" x2="11" y2="7"/></svg>
-            </button>
-            <button onClick={() => setSizeIdx(i => Math.min(CELL_SIZES.length - 1, i + 1))} disabled={sizeIdx === CELL_SIZES.length - 1}
-              className="p-1.5 text-champagne-400 hover:text-champagne-700 disabled:opacity-30 transition-all" title="Größer">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="7" y1="3" x2="7" y2="11"/><line x1="3" y1="7" x2="11" y2="7"/></svg>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="px-4 py-6">
-        {viewMode === 'fliessend' ? (
-          // Flow view: simple responsive grid
-          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${CELL_W}px, 1fr))` }}>
-            {allCells.map(cell => (
-              <div key={cell.sku}>
-                <ImageCell cell={cell} />
-                <div className="mt-1.5 px-0.5">
-                  <p className="text-[10px] font-semibold text-champagne-700 truncate">{cell.form}</p>
-                  <p className="text-[10px] text-champagne-500 truncate">{cell.subkollektion}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          // Matrix view: rows = form/price, columns = subkollektion
-          <div className="table-container">
-            <div style={{ minWidth: LABEL_W + subkollektionen.length * (CELL_W + 6) }}>
-              {/* Header row */}
-              <div className="flex items-end gap-1.5 mb-2 pb-2 border-b border-champagne-200/60 sticky top-0 bg-[#faf9f6] z-10">
-                <div style={{ width: LABEL_W, minWidth: LABEL_W }} />
-                {subkollektionen.map(sub => (
-                  <div key={sub} style={{ width: CELL_W, minWidth: CELL_W }}
-                    className="text-[9px] font-semibold text-champagne-500 tracking-wide truncate text-center pb-1">
-                    {sub}
-                  </div>
-                ))}
-              </div>
-              {/* Data rows */}
-              {rows.map(row => {
-                const rowKey = `${row.price}|||${row.form}`;
-                return (
-                  <div key={rowKey} className="flex items-center gap-1.5 mb-1.5">
-                    <div style={{ width: LABEL_W, minWidth: LABEL_W }} className="pr-3">
-                      <p className="text-[10px] font-semibold text-champagne-700 truncate">{row.form}</p>
-                      {row.price > 0 && (
-                        <p className="text-[9px] text-champagne-400">{fmtPrice(row.price)}</p>
-                      )}
-                    </div>
-                    {subkollektionen.map(sub => {
-                      const cell = lookup[`${row.price}|||${row.form}|||${sub}`] || null;
-                      return (
-                        <div key={sub} style={{ width: CELL_W, minWidth: CELL_W }}>
-                          <ImageCell cell={cell} />
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </main>
-    </div>
-  );
-}
-
-// ─── Collection Overview ──────────────────────────────────────────────────────
-
 function CollectionOverview({ catalog, kundeName, geaendert, onSelect }) {
   const date = geaendert ? new Date(geaendert).toLocaleDateString('de-DE') : null;
 
@@ -318,13 +557,6 @@ function CollectionOverview({ catalog, kundeName, geaendert, onSelect }) {
             <p className="text-[10px] font-semibold tracking-[0.15em] text-champagne-400 uppercase mb-0.5">myKONPLOTT</p>
             <h1 className="font-display text-xl text-champagne-800 tracking-wide">{kundeName}</h1>
             {date && <p className="text-[10px] text-champagne-400 mt-0.5">Aktualisiert {date}</p>}
-          </div>
-          <div className="text-champagne-300">
-            <svg width="32" height="32" viewBox="0 0 40 40" fill="none">
-              <circle cx="20" cy="20" r="16" stroke="currentColor" strokeWidth="1"/>
-              <path d="M20 12c-4.4 0-8 3.6-8 8s3.6 8 8 8 8-3.6 8-8-3.6-8-8-8z" stroke="currentColor" strokeWidth="1"/>
-              <circle cx="20" cy="20" r="3" fill="currentColor"/>
-            </svg>
           </div>
         </div>
       </header>
@@ -348,8 +580,6 @@ function CollectionOverview({ catalog, kundeName, geaendert, onSelect }) {
     </div>
   );
 }
-
-// ─── Loading screen ───────────────────────────────────────────────────────────
 
 function LoadingScreen() {
   return (
@@ -377,8 +607,6 @@ function LoadingScreen() {
   );
 }
 
-// ─── App ──────────────────────────────────────────────────────────────────────
-
 export default function App() {
   const [catalog, setCatalog] = useState(null);
   const [kundeName, setKundeName] = useState('');
@@ -386,8 +614,11 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedKollektion, setSelectedKollektion] = useState(null);
+  const [cart, setCart] = useState([]);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [vertreterKontakt, setVertreterKontakt] = useState(null);
+  const [vertreterName, setVertreterName] = useState('');
 
-  // Extract kundeId from URL path: /restocking/{kundeId}
   const kundeId = (() => {
     const m = window.location.pathname.match(/\/restocking\/([^/]+)/);
     return m ? m[1] : null;
@@ -409,6 +640,7 @@ export default function App() {
       .then(data => {
         setKundeName(data.kundeName || kundeId);
         setGeaendert(data.geaendert);
+        setVertreterName(data.vertreterName || '');
         setCatalog(buildCatalog(data.artikel || []));
         setLoading(false);
       })
@@ -417,6 +649,41 @@ export default function App() {
         setLoading(false);
       });
   }, [kundeId]);
+
+  // Fetch vertreter kontakte from KonAgent public API
+  useEffect(() => {
+    const fetchVertreter = async () => {
+      try {
+        const res = await fetch(`${KONAGENT_URL}/api/public/vertreter`);
+        if (!res.ok) return;
+        const kontakte = await res.json();
+        // Find vertreter matching customer's vertreterName
+        const vertreter = kontakte.find(k => k.gebiet === vertreterName);
+        if (vertreter) {
+          setVertreterKontakt(vertreter);
+        }
+      } catch (e) {
+        console.warn('Failed to fetch vertreter:', e);
+      }
+    };
+
+    if (vertreterName) {
+      fetchVertreter();
+    }
+  }, [vertreterName]);
+
+  const handleAddCart = (cell) => {
+    setCart(prev => {
+      const existing = prev.find(item => item.sku === cell.sku);
+      if (existing) {
+        return prev.map(item =>
+          item.sku === cell.sku ? { ...item, qty: item.qty + 1 } : item
+        );
+      }
+      return [...prev, { sku: cell.sku, form: cell.form, qty: 1 }];
+    });
+    setCartOpen(true);
+  };
 
   if (loading) return <LoadingScreen />;
   if (!catalog || error) return <NotFound message={error} />;
@@ -428,6 +695,11 @@ export default function App() {
         onBack={() => setSelectedKollektion(null)}
         catalog={catalog}
         kundeName={kundeName}
+        cart={cart}
+        onAddCart={handleAddCart}
+        cartOpen={cartOpen}
+        onCartClose={() => setCartOpen(false)}
+        vertreterKontakt={vertreterKontakt}
       />
     );
   }
