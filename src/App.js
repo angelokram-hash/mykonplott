@@ -102,7 +102,7 @@ function NotFound({ message }) {
 
 // ─── Variants Modal ──────────────────────────────────────────────────────────
 
-function VariantsModal({ cell, allCells, onClose }) {
+function VariantsModal({ cell, allCells, onClose, onAddCart }) {
   const [variants, setVariants] = useState([]);
   const [loaded, setLoaded] = useState(10);
 
@@ -110,8 +110,8 @@ function VariantsModal({ cell, allCells, onClose }) {
     if (!cell) return;
     const matches = allCells.filter(c =>
       c.kollektion === cell.kollektion &&
+      c.subkollektion !== cell.subkollektion &&
       c.form === cell.form &&
-      Math.abs(c.price - cell.price) <= cell.price * 0.1 &&
       c.sku !== cell.sku
     );
     setVariants(matches);
@@ -132,22 +132,30 @@ function VariantsModal({ cell, allCells, onClose }) {
         <div className="overflow-y-auto flex-1 p-4">
           <div className="grid gap-2">
             {variants.slice(0, loaded).map(v => (
-              <a
-                key={v.sku}
-                href={goUrl(v.sku)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex gap-3 p-3 bg-champagne-50 hover:bg-champagne-100 rounded-lg border border-champagne-200/40 transition-all"
-              >
-                {v.imageId && (
-                  <img src={imgUrl(v.imageId, 120)} alt="" className="w-20 h-20 object-cover rounded" />
-                )}
-                <div className="flex-1">
-                  <p className="font-semibold text-champagne-800 text-sm">{v.form}</p>
-                  <p className="text-xs text-champagne-600">{v.subkollektion}</p>
-                  <p className="text-sm font-bold text-champagne-700 mt-1">{fmtPrice(v.price)}</p>
-                </div>
-              </a>
+              <div key={v.sku} className="flex gap-3 p-3 bg-champagne-50 hover:bg-champagne-100 rounded-lg border border-champagne-200/40 transition-all">
+                <a
+                  href={goUrl(v.sku)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 flex gap-3"
+                >
+                  {v.imageId && (
+                    <img src={imgUrl(v.imageId, 120)} alt="" className="w-20 h-20 object-cover rounded" />
+                  )}
+                  <div className="flex-1">
+                    <p className="font-semibold text-champagne-800 text-sm">{v.form}</p>
+                    <p className="text-xs text-champagne-600">{v.subkollektion}</p>
+                    <p className="text-sm font-bold text-champagne-700 mt-1">{fmtPrice(v.price)}</p>
+                  </div>
+                </a>
+                <button
+                  onClick={() => onAddCart(v)}
+                  className="px-2 py-1 rounded text-xs font-semibold text-champagne-700 bg-champagne-100 hover:bg-champagne-200 transition-colors whitespace-nowrap self-center"
+                  title="In den Warenkorb"
+                >
+                  + Korb
+                </button>
+              </div>
             ))}
           </div>
 
@@ -171,13 +179,18 @@ function VariantsModal({ cell, allCells, onClose }) {
 
 // ─── Set Complements Modal ──────────────────────────────────────────────────
 
-function SetComplementsModal({ cell, allCells, onClose }) {
+function SetComplementsModal({ cell, allCells, onClose, onAddCart }) {
   const [complements, setComplements] = useState([]);
   const [loaded, setLoaded] = useState(10);
 
   useEffect(() => {
     if (!cell) return;
-    const matches = allCells.filter(c => c.sku !== cell.sku);
+    const matches = allCells.filter(c =>
+      c.kollektion === cell.kollektion &&
+      c.subkollektion === cell.subkollektion &&
+      c.form !== cell.form &&
+      c.sku !== cell.sku
+    );
     setComplements(matches);
   }, [cell, allCells]);
 
@@ -196,22 +209,30 @@ function SetComplementsModal({ cell, allCells, onClose }) {
         <div className="overflow-y-auto flex-1 p-4">
           <div className="grid gap-2">
             {complements.slice(0, loaded).map(c => (
-              <a
-                key={c.sku}
-                href={goUrl(c.sku)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex gap-3 p-3 bg-champagne-50 hover:bg-champagne-100 rounded-lg border border-champagne-200/40 transition-all"
-              >
-                {c.imageId && (
-                  <img src={imgUrl(c.imageId, 120)} alt="" className="w-20 h-20 object-cover rounded" />
-                )}
-                <div className="flex-1">
-                  <p className="font-semibold text-champagne-800 text-sm">{c.kollektion}</p>
-                  <p className="text-xs text-champagne-600">{c.form} · {c.subkollektion}</p>
-                  <p className="text-sm font-bold text-champagne-700 mt-1">{fmtPrice(c.price)}</p>
-                </div>
-              </a>
+              <div key={c.sku} className="flex gap-3 p-3 bg-champagne-50 hover:bg-champagne-100 rounded-lg border border-champagne-200/40 transition-all">
+                <a
+                  href={goUrl(c.sku)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 flex gap-3"
+                >
+                  {c.imageId && (
+                    <img src={imgUrl(c.imageId, 120)} alt="" className="w-20 h-20 object-cover rounded" />
+                  )}
+                  <div className="flex-1">
+                    <p className="font-semibold text-champagne-800 text-sm">{c.kollektion}</p>
+                    <p className="text-xs text-champagne-600">{c.form} · {c.subkollektion}</p>
+                    <p className="text-sm font-bold text-champagne-700 mt-1">{fmtPrice(c.price)}</p>
+                  </div>
+                </a>
+                <button
+                  onClick={() => onAddCart(c)}
+                  className="px-2 py-1 rounded text-xs font-semibold text-champagne-700 bg-champagne-100 hover:bg-champagne-200 transition-colors whitespace-nowrap self-center"
+                  title="In den Warenkorb"
+                >
+                  + Korb
+                </button>
+              </div>
             ))}
           </div>
 
@@ -244,6 +265,15 @@ function CartView({ cartItems, onClose, vertreterKontakt, kundeName }) {
     window.open(waLink, '_blank');
   };
 
+  const handleEmail = () => {
+    if (!vertreterKontakt?.email) return;
+
+    const subject = `Restocking-Selektion von ${kundeName}`;
+    const body = `Hallo ${vertreterKontakt.name},\n\nanbei meine Restocking-Selektion:\n\n${cartItems.map(item => `${item.qty}x | ${item.sku} | ${item.form}`).join('\n')}\n\nLiebe Grüße`;
+    const mailLink = `mailto:${vertreterKontakt.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = mailLink;
+  };
+
   const handleCopy = () => {
     const text = cartItems.map(item => `${item.qty}x | ${item.sku} | ${item.form}`).join('\n');
     navigator.clipboard.writeText(text);
@@ -260,11 +290,19 @@ function CartView({ cartItems, onClose, vertreterKontakt, kundeName }) {
     URL.revokeObjectURL(url);
   };
 
+  const totalItems = cartItems.reduce((sum, item) => sum + item.qty, 0);
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50">
       <div className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl max-h-[80vh] overflow-hidden flex flex-col">
         <div className="sticky top-0 bg-white border-b border-champagne-200/40 px-5 py-3.5 flex items-center justify-between">
-          <h2 className="font-display text-lg text-champagne-800">Warenkorb ({cartItems.length})</h2>
+          <div className="flex-1">
+            <h2 className="font-display text-lg text-champagne-800">Meine Selektion</h2>
+            <p className="text-xs text-champagne-500 mt-0.5">{totalItems} Artikel · {cartItems.length} Stile</p>
+          </div>
+          {vertreterKontakt?.bild && (
+            <img src={vertreterKontakt.bild} alt={vertreterKontakt.name} className="w-10 h-10 rounded-full object-cover mr-3" />
+          )}
           <button onClick={onClose} className="text-champagne-400 hover:text-champagne-700">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
               <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
@@ -290,15 +328,29 @@ function CartView({ cartItems, onClose, vertreterKontakt, kundeName }) {
 
         <div className="sticky bottom-0 bg-white border-t border-champagne-200/40 p-4 space-y-2">
           {vertreterKontakt && (
-            <button
-              onClick={handleWhatsApp}
-              className="w-full px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all flex items-center justify-center gap-2"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.67-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.076 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421-7.403h-.004a9.87 9.87 0 00-4.94 1.298c-.504.282-.973.664-1.364 1.118l-1.852-1.852a1.375 1.375 0 10-1.946 1.946l1.852 1.852c-.454.391-.836.86-1.118 1.364a9.87 9.87 0 001.298 4.94 9.87 9.87 0 008.23 4.858c1.67 0 3.27-.417 4.67-1.15l1.852 1.852a1.375 1.375 0 101.946-1.946l-1.852-1.852c.454-.391.836-.86 1.118-1.364a9.87 9.87 0 00-1.298-4.94 9.87 9.87 0 00-8.23-4.858z"/>
-              </svg>
-              WhatsApp an {vertreterKontakt.name}
-            </button>
+            <>
+              <button
+                onClick={handleWhatsApp}
+                className="w-full px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all flex items-center justify-center gap-2"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.67-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.076 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421-7.403h-.004a9.87 9.87 0 00-4.94 1.298c-.504.282-.973.664-1.364 1.118l-1.852-1.852a1.375 1.375 0 10-1.946 1.946l1.852 1.852c-.454.391-.836.86-1.118 1.364a9.87 9.87 0 001.298 4.94 9.87 9.87 0 008.23 4.858c1.67 0 3.27-.417 4.67-1.15l1.852 1.852a1.375 1.375 0 101.946-1.946l-1.852-1.852c.454-.391.836-.86 1.118-1.364a9.87 9.87 0 00-1.298-4.94 9.87 9.87 0 00-8.23-4.858z"/>
+                </svg>
+                WhatsApp an {vertreterKontakt.name}
+              </button>
+              {vertreterKontakt.email && (
+                <button
+                  onClick={handleEmail}
+                  className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold transition-all flex items-center justify-center gap-2"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="2" y="4" width="20" height="16" rx="2"/>
+                    <path d="m22 7-10 5L2 7"/>
+                  </svg>
+                  Email an {vertreterKontakt.name}
+                </button>
+              )}
+            </>
           )}
 
           <div className="flex gap-2">
@@ -365,29 +417,29 @@ function ImageCell({ cell, allCells, onAddCart, cartOpen }) {
       </div>
 
       {/* Buttons below */}
-      <div className="flex gap-1 mt-2 flex-wrap">
+      <div className="flex gap-1.5 mt-2 flex-wrap">
         <button
           onClick={() => setShowVariants(true)}
-          className="flex-1 min-w-[60px] px-2 py-1.5 text-xs font-semibold bg-champagne-700 text-white rounded-lg hover:bg-champagne-800 transition-all"
+          className="flex-1 min-w-[55px] px-2 py-1 text-[11px] font-medium text-champagne-700 bg-champagne-100/80 rounded-md hover:bg-champagne-150 transition-colors"
         >
           Variante
         </button>
         <button
           onClick={() => setShowComplements(true)}
-          className="flex-1 min-w-[60px] px-2 py-1.5 text-xs font-semibold bg-champagne-200 text-champagne-800 rounded-lg hover:bg-champagne-300 transition-all"
+          className="flex-1 min-w-[55px] px-2 py-1 text-[11px] font-medium text-champagne-700 bg-champagne-100/80 rounded-md hover:bg-champagne-150 transition-colors"
         >
           Seterg.
         </button>
         <button
           onClick={() => onAddCart(cell)}
-          className="flex-1 min-w-[80px] px-2 py-1.5 text-xs font-semibold bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all"
+          className="flex-1 min-w-[65px] px-2 py-1 text-[11px] font-medium text-amber-700 bg-amber-100/80 rounded-md hover:bg-amber-150 transition-colors"
         >
           🛒 Korb
         </button>
       </div>
 
-      {showVariants && <VariantsModal cell={cell} allCells={allCells} onClose={() => setShowVariants(false)} />}
-      {showComplements && <SetComplementsModal cell={cell} allCells={allCells} onClose={() => setShowComplements(false)} />}
+      {showVariants && <VariantsModal cell={cell} allCells={allCells} onClose={() => setShowVariants(false)} onAddCart={onAddCart} />}
+      {showComplements && <SetComplementsModal cell={cell} allCells={allCells} onClose={() => setShowComplements(false)} onAddCart={onAddCart} />}
     </>
   );
 }
@@ -398,7 +450,7 @@ const CELL_SIZES = [120, 150, 180, 220, 260];
 
 function KollektionView({ kollektion, onBack, catalog, kundeName, cart, onAddCart, cartOpen, onCartOpen, onCartClose, vertreterKontakt }) {
   const [sizeIdx, setSizeIdx] = useState(2);
-  const [viewMode, setViewMode] = useState('tabelle');
+  const [viewMode, setViewMode] = useState('fliessend');
 
   const { rows, subkollektionen, lookup } = buildMatrix(catalog.byKollektion, kollektion);
   const allCells = catalog.cells;
@@ -566,11 +618,30 @@ function CollectionOverview({ catalog, kundeName, geaendert, onSelect, vertreter
               <div>
                 <p className="text-[10px] font-semibold tracking-[0.15em] text-champagne-400 uppercase mb-0.5">Ihr Vertreter</p>
                 <p className="text-sm text-champagne-800 font-medium">{vertreterKontakt.name}</p>
-                {vertreterKontakt.whatsapp && (
-                  <a href={`https://wa.me/${vertreterKontakt.whatsapp.replace(/[^0-9+]/g, '')}`} target="_blank" rel="noopener noreferrer" className="text-[10px] text-champagne-600 hover:text-champagne-800">
-                    WhatsApp
-                  </a>
-                )}
+                <div className="flex items-center gap-2 mt-1">
+                  {vertreterKontakt.whatsapp && (
+                    <a href={`https://wa.me/${vertreterKontakt.whatsapp.replace(/[^0-9+]/g, '')}`} target="_blank" rel="noopener noreferrer" className="text-champagne-600 hover:text-green-600 transition" title="WhatsApp">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.272-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.67-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.076 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421-7.403h-.004a9.87 9.87 0 00-4.968 1.495c-1.529.88-2.773 2.114-3.557 3.635-.779 1.524-1.188 3.199-1.188 4.905 0 1.339.209 2.647.616 3.897l.964-3.523c-.151-1.073-.23-2.18-.23-3.374 0-1.442.369-2.842 1.055-4.045.687-1.203 1.64-2.214 2.802-2.92 1.162-.707 2.485-1.08 3.85-1.08h.004c1.362 0 2.685.373 3.847 1.08 1.162.706 2.115 1.717 2.802 2.92.686 1.203 1.055 2.603 1.055 4.045 0 1.194-.079 2.301-.23 3.374l.964 3.523c.407-1.25.616-2.558.616-3.897 0-1.706-.409-3.381-1.188-4.905-.784-1.521-2.028-2.755-3.557-3.635a9.87 9.87 0 00-4.968-1.495"/>
+                      </svg>
+                    </a>
+                  )}
+                  {vertreterKontakt.email && (
+                    <a href={`mailto:${vertreterKontakt.email}`} className="text-champagne-600 hover:text-blue-600 transition" title="Email">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="2" y="4" width="20" height="16" rx="2"/>
+                        <path d="m22 7-10 5L2 7"/>
+                      </svg>
+                    </a>
+                  )}
+                  {vertreterKontakt.telefon && (
+                    <a href={`tel:${vertreterKontakt.telefon.replace(/\s/g, '')}`} className="text-champagne-600 hover:text-orange-600 transition" title="Telefon">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+                      </svg>
+                    </a>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -673,8 +744,8 @@ export default function App() {
         const res = await fetch(`${KONAGENT_URL}/api/public/vertreter`);
         if (!res.ok) return;
         const kontakte = await res.json();
-        // Find vertreter matching customer's vertreterName
-        const vertreter = kontakte.find(k => k.gebiet === vertreterName);
+        // Find vertreter matching customer's vertreterName (case-insensitive)
+        const vertreter = kontakte.find(k => k.gebiet.toLowerCase() === vertreterName.toLowerCase());
         if (vertreter) {
           setVertreterKontakt(vertreter);
         }
