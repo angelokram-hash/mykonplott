@@ -1,29 +1,154 @@
 // myKONPLOTT – Restocking viewer
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 
 const KONAGENT_URL = process.env.REACT_APP_KONAGENT_URL || 'https://kon-agent.vercel.app';
 const CDN_BASE = 'https://konplott-cdn.com/mytism/image';
+
+// ─── PIN Screen ─────────────────────────────────────────────────────────────
+
+function PinScreen({ kundeId, onSuccess }) {
+  const [pin, setPin] = useState(['', '', '', '']);
+  const [pinError, setPinError] = useState('');
+  const [checking, setChecking] = useState(false);
+  const ref0 = useRef(null);
+  const ref1 = useRef(null);
+  const ref2 = useRef(null);
+  const ref3 = useRef(null);
+
+  // Auto-trigger restocking list creation in background while PIN is shown
+  useEffect(() => {
+    fetch(`${KONAGENT_URL}/api/public/restocking-trigger`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kundeId }),
+    }).catch(() => {}); // fire-and-forget
+  }, [kundeId]);
+
+  useEffect(() => { ref0.current?.focus(); }, []);
+
+  const getRefs = () => [ref0, ref1, ref2, ref3];
+
+  const verifyPin = (fullPin) => {
+    setChecking(true);
+    fetch(`${KONAGENT_URL}/api/public/verify-pin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kundeId, pin: fullPin }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) {
+          sessionStorage.setItem(`pin_${kundeId}`, 'ok');
+          onSuccess();
+        } else {
+          setPinError('Falscher PIN');
+          setPin(['', '', '', '']);
+          ref0.current?.focus();
+        }
+      })
+      .catch(() => {
+        setPinError('Verbindungsfehler');
+        setPin(['', '', '', '']);
+        ref0.current?.focus();
+      })
+      .finally(() => setChecking(false));
+  };
+
+  const handleChange = (idx, value) => {
+    if (!/^\d*$/.test(value)) return;
+    const digit = value.slice(-1);
+    const newPin = [...pin];
+    newPin[idx] = digit;
+    setPin(newPin);
+    setPinError('');
+    const allRefs = getRefs();
+    if (digit && idx < 3) allRefs[idx + 1].current?.focus();
+    if (digit && idx === 3 && newPin.join('').length === 4) verifyPin(newPin.join(''));
+  };
+
+  const handleKeyDown = (idx, e) => {
+    if (e.key === 'Backspace' && !pin[idx] && idx > 0) {
+      getRefs()[idx - 1].current?.focus();
+    }
+  };
+
+  const handlePaste = (e) => {
+    e.preventDefault();
+    const text = (e.clipboardData || window.clipboardData).getData('text');
+    const digits = text.replace(/\D/g, '').slice(0, 4);
+    if (digits.length === 0) return;
+    const newPin = ['', '', '', ''];
+    for (let i = 0; i < digits.length; i++) newPin[i] = digits[i];
+    setPin(newPin);
+    setPinError('');
+    const allRefs = getRefs();
+    if (digits.length < 4) {
+      allRefs[digits.length].current?.focus();
+    } else {
+      allRefs[3].current?.focus();
+      verifyPin(newPin.join(''));
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#faf9f6]">
+      <div className="text-center px-6">
+        <img src="/konplott-logo-oval.svg" alt="KONPLOTT" className="w-16 h-auto mx-auto mb-4 opacity-80" />
+        <img src="/konplott-wordmark.svg" alt="KONPLOTT" className="h-4 mx-auto mb-6 opacity-50" />
+        <div className="w-8 mx-auto border-t border-champagne-300/50 mb-6" />
+        <h1 className="font-display text-2xl text-champagne-800 tracking-wide mb-8">PIN</h1>
+        <div className="flex justify-center gap-3 mb-6">
+          {pin.map((d, i) => (
+            <input
+              key={i}
+              ref={getRefs()[i]}
+              type="tel"
+              inputMode="numeric"
+              maxLength={1}
+              value={d}
+              onChange={e => handleChange(i, e.target.value)}
+              onKeyDown={e => handleKeyDown(i, e)}
+              onPaste={handlePaste}
+              disabled={checking}
+              className="w-16 h-20 text-center text-3xl font-display text-champagne-800 bg-white border-2 border-champagne-200 rounded-xl focus:border-champagne-500 focus:ring-2 focus:ring-champagne-200 outline-none transition-all"
+            />
+          ))}
+        </div>
+        {pinError && <p className="text-red-500 text-sm font-medium">{pinError}</p>}
+        {checking && <p className="text-champagne-500 text-sm">Wird geprüft...</p>}
+      </div>
+    </div>
+  );
+}
 
 function imgUrl(id, size) {
   if (!id) return null;
   return `${CDN_BASE}/${id}/${id}.jpg?width=${size}&height=${size}&box=true`;
 }
 
-function goUrl(ean) {
-  return `https://www.konplott.com/go/${ean}`;
-}
+// function goUrl(ean) {
+//   return `https://www.konplott.com/go/${ean}`;
+// }
 
 function fmtPrice(v) {
   if (v == null || v === 0) return null;
-  return v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+  return 'VK ' + v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
 }
 
 function buildCatalog(artikel) {
-  const cells = artikel.map(a => ({
+  // Deduplicate by EAN — keep first occurrence
+  const seenEan = new Set();
+  const deduped = artikel.filter(a => {
+    if (seenEan.has(a.ean)) return false;
+    seenEan.add(a.ean);
+    return true;
+  });
+
+  const cells = deduped.map(a => ({
     sku: a.ean,
-    kollektion: a.kollektionsName || '—',
-    form: a.formName || a.bezeichnung || '—',
-    subkollektion: a.subKollektionsName || '—',
+    kollektion: (a.kollektionsName || '—').trim(),
+    form: (a.formName || a.bezeichnung || '—').trim(),
+    subkollektion: (a.subKollektionsName || '—').trim(),
     bezeichnung: a.bezeichnung || '',
     price: a.verkaufspreiBrutto,
     imageId: a.vorschaubildId,
@@ -50,12 +175,18 @@ function buildCatalog(artikel) {
   });
 
   const kollektionPreviews = {};
+  const kollektionTopPreviews = {}; // Vorschaubild = teuerster Artikel der Kollektion (für Katalog)
   kollOrder.forEach(k => {
     const first = byKollektion[k].find(c => c.imageId);
     if (first) kollektionPreviews[k] = { image: imgUrl(first.imageId, 600) };
+    const withImg = byKollektion[k].filter(c => c.imageId);
+    if (withImg.length) {
+      const top = withImg.reduce((a, b) => ((b.price || 0) > (a.price || 0) ? b : a));
+      kollektionTopPreviews[k] = { image: imgUrl(top.imageId, 600) };
+    }
   });
 
-  return { kollektionen: kollOrder, byKollektion, kollektionPreviews, cells };
+  return { kollektionen: kollOrder, byKollektion, kollektionPreviews, kollektionTopPreviews, cells };
 }
 
 function buildMatrix(byKollektion, kollektion) {
@@ -102,9 +233,13 @@ function NotFound({ message }) {
 
 // ─── Variants Modal ──────────────────────────────────────────────────────────
 
-function VariantsModal({ cell, allCells, onClose, onAddCart }) {
+function VariantsModal({ cell, allCells, onClose, onAddCart, cart, onSetQty, allowStock = true, lager }) {
   const [variants, setVariants] = useState([]);
   const [loaded, setLoaded] = useState(10);
+  const [stockItems, setStockItems] = useState([]);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [stockLoaded, setStockLoaded] = useState(false);
+  const [stockError, setStockError] = useState('');
 
   useEffect(() => {
     if (!cell) return;
@@ -115,7 +250,49 @@ function VariantsModal({ cell, allCells, onClose, onAddCart }) {
       c.sku !== cell.sku
     );
     setVariants(matches);
+    setStockItems([]);
+    setStockLoaded(false);
+    setStockError('');
   }, [cell, allCells]);
+
+  const loadStock = async () => {
+    if (!cell) return;
+    setStockLoading(true);
+    setStockError('');
+    try {
+      const existingEans = [cell.sku, ...variants.map(v => v.sku)];
+      const res = await fetch(`${KONAGENT_URL}/api/public/stock-search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kollektion: cell.kollektion,
+          form: cell.form,
+          exclude: existingEans,
+          ...(lager ? { lager } : {}),
+        }),
+      });
+      if (!res.ok) throw new Error(`Fehler ${res.status}`);
+      const data = await res.json();
+      setStockItems(data.items || []);
+      setStockLoaded(true);
+    } catch (e) {
+      setStockError(e.message || 'Stock-Abfrage fehlgeschlagen');
+    } finally {
+      setStockLoading(false);
+    }
+  };
+
+  const addStockItem = (item) => {
+    onAddCart({
+      sku: item.ean,
+      kollektion: item.kollektion,
+      form: item.form,
+      subkollektion: item.subKollektion,
+      price: item.richtpreis,
+      imageId: item.vorschaubildId,
+      fromStock: true,
+    });
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50">
@@ -131,13 +308,13 @@ function VariantsModal({ cell, allCells, onClose, onAddCart }) {
 
         <div className="overflow-y-auto flex-1 p-4">
           <div className="grid gap-2">
-            {variants.slice(0, loaded).map(v => (
+            {variants.slice(0, loaded).map(v => {
+              const inCart = cart?.find(item => item.sku === v.sku);
+              return (
               <div key={v.sku} className="flex gap-3 p-3 bg-champagne-50 hover:bg-champagne-100 rounded-lg border border-champagne-200/40 transition-all">
-                <a
-                  href={goUrl(v.sku)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1 flex gap-3"
+                <button
+                  onClick={() => onAddCart(v)}
+                  className="flex-1 flex gap-3 text-left cursor-pointer"
                 >
                   {v.imageId && (
                     <img src={imgUrl(v.imageId, 120)} alt="" className="w-20 h-20 object-cover rounded" />
@@ -145,18 +322,27 @@ function VariantsModal({ cell, allCells, onClose, onAddCart }) {
                   <div className="flex-1">
                     <p className="font-semibold text-champagne-800 text-sm">{v.form}</p>
                     <p className="text-xs text-champagne-600">{v.subkollektion}</p>
+                    <p className="text-[10px] text-champagne-400 font-mono mt-0.5">{v.sku}</p>
                     <p className="text-sm font-bold text-champagne-700 mt-1">{fmtPrice(v.price)}</p>
                   </div>
-                </a>
-                <button
-                  onClick={() => onAddCart(v)}
-                  className="px-2 py-1 rounded text-xs font-semibold text-champagne-700 bg-champagne-100 hover:bg-champagne-200 transition-colors whitespace-nowrap self-center"
-                  title="In den Warenkorb"
-                >
-                  + Korb
                 </button>
+                {inCart ? (
+                  <div className="flex items-center gap-1 self-center">
+                    <button onClick={() => onSetQty(v.sku, inCart.qty - 1)} className="w-7 h-7 flex items-center justify-center rounded-full bg-champagne-200/60 text-champagne-700 hover:bg-champagne-300 text-sm font-bold">−</button>
+                    <span className="w-5 text-center font-bold text-champagne-800 text-xs">{inCart.qty}</span>
+                    <button onClick={() => onSetQty(v.sku, inCart.qty + 1)} className="w-7 h-7 flex items-center justify-center rounded-full bg-champagne-200/60 text-champagne-700 hover:bg-champagne-300 text-sm font-bold">+</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => onAddCart(v)}
+                    className="px-2 py-1 rounded text-xs font-semibold text-champagne-700 bg-champagne-100 hover:bg-champagne-200 transition-colors whitespace-nowrap self-center"
+                  >
+                    hinzufügen
+                  </button>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
 
           {loaded < variants.length && (
@@ -168,9 +354,85 @@ function VariantsModal({ cell, allCells, onClose, onAddCart }) {
             </button>
           )}
 
-          {variants.length === 0 && (
-            <p className="text-center text-champagne-500 text-sm py-6">Keine Varianten gefunden</p>
+          {variants.length === 0 && !stockLoaded && (
+            <p className="text-center text-champagne-500 text-sm py-6">Keine Varianten in der Liste</p>
           )}
+
+          {/* KONPLOTT Stock section */}
+          {allowStock && <div className="mt-4 border-t border-champagne-200/40 pt-4">
+            {!stockLoaded && !stockLoading && (
+              <button
+                onClick={loadStock}
+                className="w-full px-4 py-2.5 bg-champagne-700 text-white rounded-lg hover:bg-champagne-800 text-sm font-semibold flex items-center justify-center gap-2"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+                KONPLOTT Stock abfragen
+              </button>
+            )}
+
+            {stockLoading && (
+              <div className="flex items-center justify-center gap-2 py-4 text-champagne-500 text-sm">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                Stock wird abgefragt...
+              </div>
+            )}
+
+            {stockError && (
+              <p className="text-center text-red-500 text-sm py-2">{stockError}</p>
+            )}
+
+            {stockLoaded && stockItems.length > 0 && (
+              <>
+                <p className="text-xs text-champagne-500 mb-2 font-semibold uppercase tracking-wide">KONPLOTT Stock ({stockItems.length} verfügbar)</p>
+                <div className="grid gap-2">
+                  {stockItems.map(item => {
+                    const inCart = cart?.find(ci => ci.sku === item.ean);
+                    return (
+                      <div key={item.ean} className="flex gap-3 p-3 bg-emerald-50 hover:bg-emerald-100 rounded-lg border border-emerald-200/60 transition-all">
+                        <button
+                          onClick={() => addStockItem(item)}
+                          className="flex-1 flex gap-3 text-left cursor-pointer"
+                        >
+                          {item.vorschaubildId && (
+                            <img src={imgUrl(item.vorschaubildId, 120)} alt="" className="w-20 h-20 object-cover rounded" />
+                          )}
+                          <div className="flex-1">
+                            <p className="font-semibold text-champagne-800 text-sm">{item.form}</p>
+                            <p className="text-xs text-champagne-600">{item.subKollektion}</p>
+                            <p className="text-[10px] text-champagne-400 font-mono mt-0.5">{item.ean}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              {item.richtpreis > 0 && <p className="text-sm font-bold text-champagne-700">{fmtPrice(item.richtpreis)}</p>}
+                              <span className="text-[10px] bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded-full font-semibold">sofort lieferbar</span>
+                            </div>
+                          </div>
+                        </button>
+                        {inCart ? (
+                          <div className="flex items-center gap-1 self-center">
+                            <button onClick={() => onSetQty(item.ean, inCart.qty - 1)} className="w-7 h-7 flex items-center justify-center rounded-full bg-emerald-200/60 text-emerald-700 hover:bg-emerald-300 text-sm font-bold">−</button>
+                            <span className="w-5 text-center font-bold text-champagne-800 text-xs">{inCart.qty}</span>
+                            <button onClick={() => onSetQty(item.ean, inCart.qty + 1)} className="w-7 h-7 flex items-center justify-center rounded-full bg-emerald-200/60 text-emerald-700 hover:bg-emerald-300 text-sm font-bold">+</button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => addStockItem(item)}
+                            className="px-2 py-1 rounded text-xs font-semibold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 transition-colors whitespace-nowrap self-center"
+                          >
+                            hinzufügen
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {stockLoaded && stockItems.length === 0 && (
+              <p className="text-center text-champagne-500 text-sm py-2">Keine weiteren Varianten im KONPLOTT Stock</p>
+            )}
+          </div>}
         </div>
       </div>
     </div>
@@ -179,9 +441,13 @@ function VariantsModal({ cell, allCells, onClose, onAddCart }) {
 
 // ─── Set Complements Modal ──────────────────────────────────────────────────
 
-function SetComplementsModal({ cell, allCells, onClose, onAddCart }) {
+function SetComplementsModal({ cell, allCells, onClose, onAddCart, cart, onSetQty, allowStock = true, lager }) {
   const [complements, setComplements] = useState([]);
   const [loaded, setLoaded] = useState(10);
+  const [stockItems, setStockItems] = useState([]);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [stockLoaded, setStockLoaded] = useState(false);
+  const [stockError, setStockError] = useState('');
 
   useEffect(() => {
     if (!cell) return;
@@ -192,7 +458,49 @@ function SetComplementsModal({ cell, allCells, onClose, onAddCart }) {
       c.sku !== cell.sku
     );
     setComplements(matches);
+    setStockItems([]);
+    setStockLoaded(false);
+    setStockError('');
   }, [cell, allCells]);
+
+  const loadStock = async () => {
+    if (!cell) return;
+    setStockLoading(true);
+    setStockError('');
+    try {
+      const existingEans = [cell.sku, ...complements.map(c => c.sku)];
+      const res = await fetch(`${KONAGENT_URL}/api/public/stock-search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kollektion: cell.kollektion,
+          subKollektion: cell.subkollektion,
+          exclude: existingEans,
+          ...(lager ? { lager } : {}),
+        }),
+      });
+      if (!res.ok) throw new Error(`Fehler ${res.status}`);
+      const data = await res.json();
+      setStockItems(data.items || []);
+      setStockLoaded(true);
+    } catch (e) {
+      setStockError(e.message || 'Stock-Abfrage fehlgeschlagen');
+    } finally {
+      setStockLoading(false);
+    }
+  };
+
+  const addStockItem = (item) => {
+    onAddCart({
+      sku: item.ean,
+      kollektion: item.kollektion,
+      form: item.form,
+      subkollektion: item.subKollektion,
+      price: item.richtpreis,
+      imageId: item.vorschaubildId,
+      fromStock: true,
+    });
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50">
@@ -208,13 +516,13 @@ function SetComplementsModal({ cell, allCells, onClose, onAddCart }) {
 
         <div className="overflow-y-auto flex-1 p-4">
           <div className="grid gap-2">
-            {complements.slice(0, loaded).map(c => (
+            {complements.slice(0, loaded).map(c => {
+              const inCart = cart?.find(item => item.sku === c.sku);
+              return (
               <div key={c.sku} className="flex gap-3 p-3 bg-champagne-50 hover:bg-champagne-100 rounded-lg border border-champagne-200/40 transition-all">
-                <a
-                  href={goUrl(c.sku)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1 flex gap-3"
+                <button
+                  onClick={() => onAddCart(c)}
+                  className="flex-1 flex gap-3 text-left cursor-pointer"
                 >
                   {c.imageId && (
                     <img src={imgUrl(c.imageId, 120)} alt="" className="w-20 h-20 object-cover rounded" />
@@ -222,18 +530,27 @@ function SetComplementsModal({ cell, allCells, onClose, onAddCart }) {
                   <div className="flex-1">
                     <p className="font-semibold text-champagne-800 text-sm">{c.kollektion}</p>
                     <p className="text-xs text-champagne-600">{c.form} · {c.subkollektion}</p>
+                    <p className="text-[10px] text-champagne-400 font-mono mt-0.5">{c.sku}</p>
                     <p className="text-sm font-bold text-champagne-700 mt-1">{fmtPrice(c.price)}</p>
                   </div>
-                </a>
-                <button
-                  onClick={() => onAddCart(c)}
-                  className="px-2 py-1 rounded text-xs font-semibold text-champagne-700 bg-champagne-100 hover:bg-champagne-200 transition-colors whitespace-nowrap self-center"
-                  title="In den Warenkorb"
-                >
-                  + Korb
                 </button>
+                {inCart ? (
+                  <div className="flex items-center gap-1 self-center">
+                    <button onClick={() => onSetQty(c.sku, inCart.qty - 1)} className="w-7 h-7 flex items-center justify-center rounded-full bg-champagne-200/60 text-champagne-700 hover:bg-champagne-300 text-sm font-bold">−</button>
+                    <span className="w-5 text-center font-bold text-champagne-800 text-xs">{inCart.qty}</span>
+                    <button onClick={() => onSetQty(c.sku, inCart.qty + 1)} className="w-7 h-7 flex items-center justify-center rounded-full bg-champagne-200/60 text-champagne-700 hover:bg-champagne-300 text-sm font-bold">+</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => onAddCart(c)}
+                    className="px-2 py-1 rounded text-xs font-semibold text-champagne-700 bg-champagne-100 hover:bg-champagne-200 transition-colors whitespace-nowrap self-center"
+                  >
+                    hinzufügen
+                </button>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
 
           {loaded < complements.length && (
@@ -244,6 +561,82 @@ function SetComplementsModal({ cell, allCells, onClose, onAddCart }) {
               {complements.length - loaded} weitere Artikel laden
             </button>
           )}
+
+          {/* KONPLOTT Stock section */}
+          {allowStock && <div className="mt-4 border-t border-champagne-200/40 pt-4">
+            {!stockLoaded && !stockLoading && (
+              <button
+                onClick={loadStock}
+                className="w-full px-4 py-2.5 bg-champagne-700 text-white rounded-lg hover:bg-champagne-800 text-sm font-semibold flex items-center justify-center gap-2"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+                KONPLOTT Stock abfragen
+              </button>
+            )}
+
+            {stockLoading && (
+              <div className="flex items-center justify-center gap-2 py-4 text-champagne-500 text-sm">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                Stock wird abgefragt...
+              </div>
+            )}
+
+            {stockError && (
+              <p className="text-center text-red-500 text-sm py-2">{stockError}</p>
+            )}
+
+            {stockLoaded && stockItems.length > 0 && (
+              <>
+                <p className="text-xs text-champagne-500 mb-2 font-semibold uppercase tracking-wide">KONPLOTT Stock ({stockItems.length} verfügbar)</p>
+                <div className="grid gap-2">
+                  {stockItems.map(item => {
+                    const inCart = cart?.find(ci => ci.sku === item.ean);
+                    return (
+                      <div key={item.ean} className="flex gap-3 p-3 bg-emerald-50 hover:bg-emerald-100 rounded-lg border border-emerald-200/60 transition-all">
+                        <button
+                          onClick={() => addStockItem(item)}
+                          className="flex-1 flex gap-3 text-left cursor-pointer"
+                        >
+                          {item.vorschaubildId && (
+                            <img src={imgUrl(item.vorschaubildId, 120)} alt="" className="w-20 h-20 object-cover rounded" />
+                          )}
+                          <div className="flex-1">
+                            <p className="font-semibold text-champagne-800 text-sm">{item.kollektion}</p>
+                            <p className="text-xs text-champagne-600">{item.form} · {item.subKollektion}</p>
+                            <p className="text-[10px] text-champagne-400 font-mono mt-0.5">{item.ean}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              {item.richtpreis > 0 && <p className="text-sm font-bold text-champagne-700">{fmtPrice(item.richtpreis)}</p>}
+                              <span className="text-[10px] bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded-full font-semibold">sofort lieferbar</span>
+                            </div>
+                          </div>
+                        </button>
+                        {inCart ? (
+                          <div className="flex items-center gap-1 self-center">
+                            <button onClick={() => onSetQty(item.ean, inCart.qty - 1)} className="w-7 h-7 flex items-center justify-center rounded-full bg-emerald-200/60 text-emerald-700 hover:bg-emerald-300 text-sm font-bold">−</button>
+                            <span className="w-5 text-center font-bold text-champagne-800 text-xs">{inCart.qty}</span>
+                            <button onClick={() => onSetQty(item.ean, inCart.qty + 1)} className="w-7 h-7 flex items-center justify-center rounded-full bg-emerald-200/60 text-emerald-700 hover:bg-emerald-300 text-sm font-bold">+</button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => addStockItem(item)}
+                            className="px-2 py-1 rounded text-xs font-semibold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 transition-colors whitespace-nowrap self-center"
+                          >
+                            hinzufügen
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {stockLoaded && stockItems.length === 0 && (
+              <p className="text-center text-champagne-500 text-sm py-2">Keine weiteren Artikel im KONPLOTT Stock</p>
+            )}
+          </div>}
         </div>
       </div>
     </div>
@@ -252,45 +645,128 @@ function SetComplementsModal({ cell, allCells, onClose, onAddCart }) {
 
 // ─── Cart View Modal ────────────────────────────────────────────────────────
 
-function CartView({ cartItems, onClose, vertreterKontakt, kundeName }) {
-  if (cartItems.length === 0) {
+function CartView({ cartItems, onClose, vertreterKontakt, kundeName, kundeId, onSetQty, onRemove, onOrderComplete, allowOrder = true, onSaveList }) {
+  const [ordering, setOrdering] = useState(false);
+  const [orderConfirm, setOrderConfirm] = useState(false);
+  const [orderSuccess, setOrderSuccess] = useState(null); // { id, datum }
+  const [orderError, setOrderError] = useState('');
+  // Liste speichern
+  const [listName, setListName] = useState('');
+  const [savingList, setSavingList] = useState(false);
+  const [listSaved, setListSaved] = useState(false);
+  const [listError, setListError] = useState('');
+
+  const handleSaveListClick = async () => {
+    const name = listName.trim();
+    if (!name || !onSaveList) return;
+    setSavingList(true);
+    setListError('');
+    try {
+      await onSaveList(name);
+      setListSaved(true);
+      setListName('');
+      setTimeout(() => setListSaved(false), 2500);
+    } catch (e) {
+      setListError(e?.message || 'Speichern fehlgeschlagen');
+    } finally {
+      setSavingList(false);
+    }
+  };
+
+  if (cartItems.length === 0 && !orderSuccess) {
     return null;
   }
 
-  const handleWhatsApp = () => {
+  const selektionText = cartItems.map(item => `${item.qty}x | ${item.sku} | ${item.form}`).join('\n');
+
+  const handleWhatsAppVertreter = () => {
     if (!vertreterKontakt?.whatsapp) return;
-
-    const message = `Hallo ${vertreterKontakt.name},\n\nanbei meine Restocking-Selektion:\n\n${cartItems.map(item => `${item.qty}x | ${item.sku} | ${item.form}`).join('\n')}\n\nLiebe Grüße`;
-    const waLink = `https://wa.me/${vertreterKontakt.whatsapp.replace(/[^0-9+]/g, '')}?text=${encodeURIComponent(message)}`;
-    window.open(waLink, '_blank');
+    const message = `Hallo ${vertreterKontakt.name},\n\nanbei meine Selektion:\n\n${selektionText}\n\nLiebe Grüße`;
+    window.open(`https://wa.me/${vertreterKontakt.whatsapp.replace(/[^0-9+]/g, '')}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
-  const handleEmail = () => {
+  const handleWhatsApp = () => {
+    const message = `Meine KONPLOTT Selektion:\n\n${selektionText}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
+  };
+
+  const handleEmailVertreter = () => {
     if (!vertreterKontakt?.email) return;
-
-    const subject = `Restocking-Selektion von ${kundeName}`;
-    const body = `Hallo ${vertreterKontakt.name},\n\nanbei meine Restocking-Selektion:\n\n${cartItems.map(item => `${item.qty}x | ${item.sku} | ${item.form}`).join('\n')}\n\nLiebe Grüße`;
-    const mailLink = `mailto:${vertreterKontakt.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.location.href = mailLink;
+    const subject = `Selektion von ${kundeName}`;
+    const body = `Hallo ${vertreterKontakt.name},\n\nanbei meine Selektion:\n\n${selektionText}\n\nLiebe Grüße`;
+    window.location.href = `mailto:${vertreterKontakt.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
-  const handleCopy = () => {
-    const text = cartItems.map(item => `${item.qty}x | ${item.sku} | ${item.form}`).join('\n');
-    navigator.clipboard.writeText(text);
-  };
 
-  const handleExportCSV = () => {
-    const csv = ['SKU,Form,Menge'].concat(cartItems.map(item => `${item.sku},${item.form},${item.qty}`)).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `restocking-${kundeName}-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleOrder = async () => {
+    setOrdering(true);
+    setOrderError('');
+    try {
+      const artikel = cartItems.map(item => ({
+        ean: item.sku,
+        bezeichnung: item.form,
+        formName: item.form,
+        menge: item.qty,
+        imageId: item.imageId || '',
+      }));
+      const res = await fetch(`${KONAGENT_URL}/api/public/bestellung`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kundeId, kundeName, artikel }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Bestellung fehlgeschlagen');
+      }
+      const data = await res.json();
+      setOrderSuccess({ id: data.id, datum: data.datum });
+      setOrderConfirm(false);
+      if (onOrderComplete) onOrderComplete();
+    } catch (e) {
+      setOrderError(e.message || 'Fehler beim Bestellen');
+    } finally {
+      setOrdering(false);
+    }
   };
 
   const totalItems = cartItems.reduce((sum, item) => sum + item.qty, 0);
+
+  // ── Order Success Screen ──
+  if (orderSuccess) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50">
+        <div className="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl overflow-hidden flex flex-col">
+          <div className="p-8 text-center">
+            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 6L9 17l-5-5"/>
+              </svg>
+            </div>
+            <h2 className="font-display text-xl text-champagne-800 mb-2">Bestellung gesendet!</h2>
+            <p className="text-sm text-champagne-600 mb-4">
+              Deine verbindliche Bestellung wurde erfolgreich übermittelt.
+            </p>
+            <div className="bg-champagne-50 rounded-xl p-4 mb-6 text-left space-y-1.5">
+              <div className="flex justify-between text-sm">
+                <span className="text-champagne-500">Datum</span>
+                <span className="font-semibold text-champagne-800">{orderSuccess.datum}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-champagne-500">Bestellnr.</span>
+                <span className="font-mono text-xs text-champagne-700">{orderSuccess.id.slice(0, 8)}…</span>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-full px-4 py-2.5 bg-champagne-800 text-white rounded-xl hover:bg-champagne-900 text-sm font-semibold transition-all"
+            >
+              Schließen
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50">
@@ -313,60 +789,139 @@ function CartView({ cartItems, onClose, vertreterKontakt, kundeName }) {
         <div className="overflow-y-auto flex-1 p-4">
           <div className="grid gap-2 mb-4">
             {cartItems.map(item => (
-              <div key={item.sku} className="flex gap-2 p-3 bg-champagne-50 rounded-lg border border-champagne-200/40">
-                <div className="flex-1">
-                  <p className="font-semibold text-champagne-800 text-sm">{item.form}</p>
-                  <p className="text-xs text-champagne-600">{item.sku}</p>
+              <div key={item.sku} className="flex gap-2 p-3 bg-champagne-50 rounded-lg border border-champagne-200/40 items-center">
+                {item.imageId && (
+                  <img src={imgUrl(item.imageId, 80)} alt="" className="w-12 h-12 object-cover rounded flex-shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-champagne-800 text-sm truncate">{item.form}</p>
+                  <p className="text-xs text-champagne-500 font-mono">Art.-Nr. {item.sku}</p>
                 </div>
-                <div className="text-right">
-                  <p className="font-bold text-champagne-700 text-sm">{item.qty}x</p>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <button
+                    onClick={() => onSetQty(item.sku, item.qty - 1)}
+                    className="w-7 h-7 flex items-center justify-center rounded-full bg-champagne-200/60 text-champagne-700 hover:bg-champagne-300 text-sm font-bold transition-colors"
+                  >−</button>
+                  <span className="w-6 text-center font-bold text-champagne-800 text-sm">{item.qty}</span>
+                  <button
+                    onClick={() => onSetQty(item.sku, item.qty + 1)}
+                    className="w-7 h-7 flex items-center justify-center rounded-full bg-champagne-200/60 text-champagne-700 hover:bg-champagne-300 text-sm font-bold transition-colors"
+                  >+</button>
+                  <button
+                    onClick={() => onRemove(item.sku)}
+                    className="w-7 h-7 flex items-center justify-center rounded-full text-red-400 hover:bg-red-50 hover:text-red-600 text-xs transition-colors ml-1"
+                    title="Entfernen"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  </button>
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="sticky bottom-0 bg-white border-t border-champagne-200/40 p-4 space-y-2">
-          {vertreterKontakt && (
-            <>
-              <button
-                onClick={handleWhatsApp}
-                className="w-full px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all flex items-center justify-center gap-2"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.67-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.076 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421-7.403h-.004a9.87 9.87 0 00-4.94 1.298c-.504.282-.973.664-1.364 1.118l-1.852-1.852a1.375 1.375 0 10-1.946 1.946l1.852 1.852c-.454.391-.836.86-1.118 1.364a9.87 9.87 0 001.298 4.94 9.87 9.87 0 008.23 4.858c1.67 0 3.27-.417 4.67-1.15l1.852 1.852a1.375 1.375 0 101.946-1.946l-1.852-1.852c.454-.391.836-.86 1.118-1.364a9.87 9.87 0 00-1.298-4.94 9.87 9.87 0 00-8.23-4.858z"/>
-                </svg>
-                WhatsApp an {vertreterKontakt.name}
-              </button>
-              {vertreterKontakt.email && (
+        <div className="sticky bottom-0 bg-white border-t border-champagne-200/40 p-3 space-y-1.5">
+          {/* ── Als Liste speichern ── */}
+          {onSaveList && (
+            <div className="bg-champagne-50 border border-champagne-200/60 rounded-xl p-2.5 mb-1">
+              <div className="flex gap-2">
+                <input
+                  value={listName}
+                  onChange={e => setListName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSaveListClick(); }}
+                  placeholder="Listenname…"
+                  className="flex-1 min-w-0 bg-white border border-champagne-200 rounded-lg px-3 py-2 text-sm text-champagne-800 placeholder-champagne-300 outline-none focus:border-champagne-400"
+                />
                 <button
-                  onClick={handleEmail}
-                  className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold transition-all flex items-center justify-center gap-2"
+                  onClick={handleSaveListClick}
+                  disabled={savingList || !listName.trim()}
+                  className="px-4 py-2 rounded-lg bg-champagne-700 text-white text-sm font-semibold hover:bg-champagne-800 disabled:opacity-50 transition-colors whitespace-nowrap flex items-center gap-1.5"
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="2" y="4" width="20" height="16" rx="2"/>
-                    <path d="m22 7-10 5L2 7"/>
-                  </svg>
-                  Email an {vertreterKontakt.name}
+                  {savingList ? (
+                    <><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"/></svg> …</>
+                  ) : listSaved ? (
+                    <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7"/></svg> Gespeichert</>
+                  ) : 'Liste speichern'}
                 </button>
-              )}
-            </>
+              </div>
+              {listError && <p className="text-[11px] text-red-500 mt-1">{listError}</p>}
+            </div>
           )}
-
-          <div className="flex gap-2">
+          {/* ── Verbindlich bestellen ── */}
+          {allowOrder && kundeId && !orderConfirm && (
             <button
-              onClick={handleCopy}
-              className="flex-1 px-4 py-2 bg-champagne-700 text-white rounded-lg hover:bg-champagne-800 text-sm font-semibold transition-all"
+              onClick={() => setOrderConfirm(true)}
+              className="w-full px-4 py-3 bg-orange-500 text-white rounded-xl hover:bg-orange-600 text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-md shadow-orange-500/20"
             >
-              Kopieren
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 12l2 2 4-4"/>
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+              </svg>
+              Verbindlich bestellen
             </button>
+          )}
+          {orderConfirm && (
+            <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 space-y-2">
+              <p className="text-sm text-orange-900 font-semibold text-center">
+                {totalItems} Artikel verbindlich bestellen?
+              </p>
+              <p className="text-xs text-orange-600 text-center">Diese Bestellung wird an KONPLOTT übermittelt.</p>
+              {orderError && <p className="text-xs text-red-600 text-center">{orderError}</p>}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setOrderConfirm(false); setOrderError(''); }}
+                  disabled={ordering}
+                  className="flex-1 px-3 py-2 bg-white text-orange-700 rounded-lg border border-orange-200 text-sm font-medium hover:bg-orange-50 transition-all"
+                >
+                  Abbrechen
+                </button>
+                <button
+                  onClick={handleOrder}
+                  disabled={ordering}
+                  className="flex-1 px-3 py-2 bg-orange-500 text-white rounded-lg text-sm font-bold hover:bg-orange-600 transition-all disabled:opacity-60 flex items-center justify-center gap-1.5"
+                >
+                  {ordering ? (
+                    <><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"/></svg> Wird gesendet…</>
+                  ) : 'Ja, bestellen'}
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="border-t border-champagne-100 pt-1.5 mt-1"></div>
+          {vertreterKontakt?.whatsapp && (
             <button
-              onClick={handleExportCSV}
-              className="flex-1 px-4 py-2 bg-champagne-200 text-champagne-800 rounded-lg hover:bg-champagne-300 text-sm font-semibold transition-all"
+              onClick={handleWhatsAppVertreter}
+              className="w-full px-4 py-2.5 bg-[#25D366] text-white rounded-xl hover:bg-[#1FAD53] text-[13px] font-semibold transition-all flex items-center justify-center gap-2.5 shadow-sm"
             >
-              CSV Export
+              <svg width="18" height="18" viewBox="0 0 175.216 175.552" fill="white">
+                <path d="M87.184 14.2c-40.36 0-73.178 32.792-73.196 73.134.002 12.89 3.372 25.47 9.78 36.572l-10.39 37.93 38.84-10.188c10.686 5.826 22.71 8.896 34.942 8.9h.032c40.348 0 73.17-32.8 73.188-73.142.008-19.536-7.59-37.908-21.396-51.726C125.192 21.904 106.736 14.2 87.184 14.2zm0 133.856h-.024c-10.916-.004-21.614-2.938-30.924-8.488l-2.218-1.316-22.988 6.03 6.14-22.434-1.444-2.298c-6.098-9.696-9.318-20.9-9.314-32.42.016-33.53 27.312-60.808 60.87-60.808 16.254.008 31.528 6.34 43.006 17.832 11.478 11.492 17.8 26.776 17.792 43.022-.02 33.54-27.32 60.88-60.896 60.88z"/>
+                <path d="M126.298 94.794c-2.148-1.074-12.706-6.27-14.678-6.986-1.972-.716-3.406-1.074-4.84 1.074-1.434 2.148-5.554 6.986-6.81 8.422-1.254 1.434-2.51.716-4.658-.36-2.148-1.074-9.07-3.342-17.276-10.66-6.388-5.696-10.702-12.73-11.956-14.878-1.254-2.148-.134-3.312 .942-4.384 .968-.964 2.148-2.51 3.224-3.764 1.074-1.254 1.432-2.148 2.148-3.582.716-1.434.358-2.69-.18-3.764-.536-1.074-4.84-11.668-6.632-15.966-1.746-4.192-3.52-3.624-4.84-3.69-1.254-.062-2.69-.076-4.124-.076-1.434 0-3.762.538-5.734 2.69-1.972 2.148-7.526 7.35-7.526 17.926 0 10.576 7.706 20.794 8.78 22.228 1.074 1.434 15.162 23.148 36.726 32.462 5.126 2.214 9.13 3.538 12.248 4.528 5.148 1.636 9.832 1.404 13.534.852 4.13-.618 12.706-5.194 14.498-10.21 1.792-5.014 1.792-9.314 1.254-10.21-.538-.896-1.972-1.434-4.12-2.508z"/>
+              </svg>
+              WhatsApp an {vertreterKontakt.name}
             </button>
-          </div>
+          )}
+          <button
+            onClick={handleWhatsApp}
+            className="w-full px-4 py-2 bg-[#25D366]/10 text-[#25D366] rounded-xl hover:bg-[#25D366]/20 text-[12px] font-medium transition-all flex items-center justify-center gap-2 border border-[#25D366]/30"
+          >
+            <svg width="15" height="15" viewBox="0 0 175.216 175.552" fill="currentColor">
+              <path d="M87.184 14.2c-40.36 0-73.178 32.792-73.196 73.134.002 12.89 3.372 25.47 9.78 36.572l-10.39 37.93 38.84-10.188c10.686 5.826 22.71 8.896 34.942 8.9h.032c40.348 0 73.17-32.8 73.188-73.142.008-19.536-7.59-37.908-21.396-51.726C125.192 21.904 106.736 14.2 87.184 14.2zm0 133.856h-.024c-10.916-.004-21.614-2.938-30.924-8.488l-2.218-1.316-22.988 6.03 6.14-22.434-1.444-2.298c-6.098-9.696-9.318-20.9-9.314-32.42.016-33.53 27.312-60.808 60.87-60.808 16.254.008 31.528 6.34 43.006 17.832 11.478 11.492 17.8 26.776 17.792 43.022-.02 33.54-27.32 60.88-60.896 60.88z"/>
+              <path d="M126.298 94.794c-2.148-1.074-12.706-6.27-14.678-6.986-1.972-.716-3.406-1.074-4.84 1.074-1.434 2.148-5.554 6.986-6.81 8.422-1.254 1.434-2.51.716-4.658-.36-2.148-1.074-9.07-3.342-17.276-10.66-6.388-5.696-10.702-12.73-11.956-14.878-1.254-2.148-.134-3.312 .942-4.384 .968-.964 2.148-2.51 3.224-3.764 1.074-1.254 1.432-2.148 2.148-3.582.716-1.434.358-2.69-.18-3.764-.536-1.074-4.84-11.668-6.632-15.966-1.746-4.192-3.52-3.624-4.84-3.69-1.254-.062-2.69-.076-4.124-.076-1.434 0-3.762.538-5.734 2.69-1.972 2.148-7.526 7.35-7.526 17.926 0 10.576 7.706 20.794 8.78 22.228 1.074 1.434 15.162 23.148 36.726 32.462 5.126 2.214 9.13 3.538 12.248 4.528 5.148 1.636 9.832 1.404 13.534.852 4.13-.618 12.706-5.194 14.498-10.21 1.792-5.014 1.792-9.314 1.254-10.21-.538-.896-1.972-1.434-4.12-2.508z"/>
+            </svg>
+            WhatsApp teilen
+          </button>
+          {vertreterKontakt?.email && (
+            <button
+              onClick={handleEmailVertreter}
+              className="w-full px-4 py-2 bg-champagne-50 text-champagne-700 rounded-xl hover:bg-champagne-100 text-[12px] font-medium border border-champagne-200/50 transition-all flex items-center justify-center gap-2"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="2"/>
+                <path d="m22 7-10 5L2 7"/>
+              </svg>
+              Email an {vertreterKontakt.name}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -375,7 +930,7 @@ function CartView({ cartItems, onClose, vertreterKontakt, kundeName }) {
 
 // ─── Image Cell with Buttons ─────────────────────────────────────────────────
 
-function ImageCell({ cell, allCells, onAddCart, cartOpen }) {
+function ImageCell({ cell, allCells, onAddCart, cartOpen, cart, onSetQty, allowStock = true, lager }) {
   const img = cell?.imageId ? imgUrl(cell.imageId, 600) : null;
   const [showVariants, setShowVariants] = useState(false);
   const [showComplements, setShowComplements] = useState(false);
@@ -389,12 +944,11 @@ function ImageCell({ cell, allCells, onAddCart, cartOpen }) {
   return (
     <>
       <div className="relative group">
-        <a
-          href={goUrl(cell.sku)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block w-full overflow-hidden bg-champagne-50/50 rounded-xl border-2 border-champagne-100/60 hover:border-champagne-300 hover:shadow-lg transition-all duration-300 active:scale-[0.97]"
+        <button
+          onClick={() => onAddCart(cell)}
+          className="block w-full overflow-hidden bg-champagne-50/50 rounded-xl border-2 border-champagne-100/60 hover:border-champagne-300 hover:shadow-lg transition-all duration-300 active:scale-[0.97] cursor-pointer"
           style={{ aspectRatio: '1' }}
+          title="In den Warenkorb"
         >
           {img ? (
             <img src={img} alt="" className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105" loading="lazy" />
@@ -407,7 +961,7 @@ function ImageCell({ cell, allCells, onAddCart, cartOpen }) {
               </svg>
             </div>
           )}
-        </a>
+        </button>
 
         {price && (
           <div className="absolute bottom-1.5 left-1.5 bg-white/90 backdrop-blur-sm text-champagne-800 text-[10px] font-bold px-2 py-0.5 rounded-lg shadow-sm border border-champagne-200/50">
@@ -430,16 +984,30 @@ function ImageCell({ cell, allCells, onAddCart, cartOpen }) {
         >
           Seterg.
         </button>
-        <button
-          onClick={() => onAddCart(cell)}
-          className="flex-1 min-w-[65px] px-2 py-1 text-[11px] font-medium text-amber-700 bg-amber-100/80 rounded-md hover:bg-amber-150 transition-colors"
-        >
-          🛒 Korb
-        </button>
+        {(() => {
+          const inCart = cart?.find(item => item.sku === cell.sku);
+          if (inCart) {
+            return (
+              <div className="flex items-center gap-0.5 min-w-[65px]">
+                <button onClick={() => onSetQty(cell.sku, inCart.qty - 1)} className="w-6 h-6 flex items-center justify-center rounded-full bg-champagne-200/60 text-champagne-700 hover:bg-champagne-300 text-xs font-bold transition-colors">−</button>
+                <span className="w-5 text-center font-bold text-champagne-800 text-[11px]">{inCart.qty}</span>
+                <button onClick={() => onSetQty(cell.sku, inCart.qty + 1)} className="w-6 h-6 flex items-center justify-center rounded-full bg-champagne-200/60 text-champagne-700 hover:bg-champagne-300 text-xs font-bold transition-colors">+</button>
+              </div>
+            );
+          }
+          return (
+            <button
+              onClick={() => onAddCart(cell)}
+              className="flex-1 min-w-[65px] px-2 py-1 text-[11px] font-medium text-amber-700 bg-amber-100/80 rounded-md hover:bg-amber-150 transition-colors"
+            >
+              🛒 Korb
+            </button>
+          );
+        })()}
       </div>
 
-      {showVariants && <VariantsModal cell={cell} allCells={allCells} onClose={() => setShowVariants(false)} onAddCart={onAddCart} />}
-      {showComplements && <SetComplementsModal cell={cell} allCells={allCells} onClose={() => setShowComplements(false)} onAddCart={onAddCart} />}
+      {showVariants && <VariantsModal cell={cell} allCells={allCells} onClose={() => setShowVariants(false)} onAddCart={onAddCart} cart={cart} onSetQty={onSetQty} allowStock={allowStock} lager={lager} />}
+      {showComplements && <SetComplementsModal cell={cell} allCells={allCells} onClose={() => setShowComplements(false)} onAddCart={onAddCart} cart={cart} onSetQty={onSetQty} allowStock={allowStock} lager={lager} />}
     </>
   );
 }
@@ -448,7 +1016,7 @@ function ImageCell({ cell, allCells, onAddCart, cartOpen }) {
 
 const CELL_SIZES = [120, 150, 180, 220, 260];
 
-function KollektionView({ kollektion, onBack, catalog, kundeName, cart, onAddCart, cartOpen, onCartOpen, onCartClose, vertreterKontakt }) {
+function KollektionView({ kollektion, onBack, catalog, kundeName, kundeId, cart, onAddCart, onSetQty, cartOpen, onCartOpen, onCartClose, vertreterKontakt, onOrderComplete, allowStock = true, lager, allowOrder = true }) {
   const [sizeIdx, setSizeIdx] = useState(2);
   const [viewMode, setViewMode] = useState('fliessend');
 
@@ -460,6 +1028,7 @@ function KollektionView({ kollektion, onBack, catalog, kundeName, cart, onAddCar
   return (
     <div className="min-h-screen bg-[#faf9f6]">
       <header className="sticky top-0 z-40 glass border-b border-champagne-200/40 px-5 py-3.5 flex items-center gap-3">
+        <img src="/konplott-logo-oval.svg" alt="" className="w-6 h-auto opacity-50 shrink-0 hidden sm:block" />
         <button onClick={onBack} className="flex items-center gap-1.5 text-champagne-500 hover:text-champagne-700 transition-colors text-xs font-semibold shrink-0 group">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="group-hover:-translate-x-0.5 transition-transform">
             <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -469,14 +1038,6 @@ function KollektionView({ kollektion, onBack, catalog, kundeName, cart, onAddCar
         <div className="w-px h-5" style={{ background: 'linear-gradient(to bottom, transparent, #d4c9b8, transparent)' }} />
         <h1 className="font-display text-base text-champagne-800 truncate tracking-wide">{kollektion}</h1>
         <div className="ml-auto flex items-center gap-1.5">
-          {cart.length > 0 && (
-            <button
-              onClick={onCartOpen}
-              className="relative px-3 py-1.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 text-xs font-semibold transition-all"
-            >
-              🛒 {cart.length}
-            </button>
-          )}
           <div className="flex items-center bg-champagne-50 rounded-xl border border-champagne-200/60 overflow-hidden mr-1">
             <button onClick={() => setViewMode('tabelle')} title="Matrix"
               className={`p-1.5 transition-all ${viewMode === 'tabelle' ? 'bg-champagne-700 text-white' : 'text-champagne-400 hover:text-champagne-600'}`}>
@@ -501,6 +1062,17 @@ function KollektionView({ kollektion, onBack, catalog, kundeName, cart, onAddCar
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="7" y1="3" x2="7" y2="11"/><line x1="3" y1="7" x2="11" y2="7"/></svg>
             </button>
           </div>
+          {cart.length > 0 && (
+            <button
+              onClick={onCartOpen}
+              className="relative flex items-center gap-1.5 px-4 py-2 bg-orange-500 text-white rounded-xl hover:bg-orange-600 text-sm font-bold transition-all shadow-md shadow-orange-500/25 ml-1"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/>
+              </svg>
+              <span className="text-base font-bold">{cart.reduce((s, i) => s + i.qty, 0)}</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -509,10 +1081,11 @@ function KollektionView({ kollektion, onBack, catalog, kundeName, cart, onAddCar
           <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${CELL_W}px, 1fr))` }}>
             {catalog.byKollektion[kollektion]?.map(cell => (
               <div key={cell.sku}>
-                <ImageCell cell={cell} allCells={allCells} onAddCart={onAddCart} cartOpen={cartOpen} />
+                <ImageCell cell={cell} allCells={allCells} onAddCart={onAddCart} cartOpen={cartOpen} cart={cart} onSetQty={onSetQty} allowStock={allowStock} lager={lager} />
                 <div className="mt-1.5 px-0.5">
                   <p className="text-[10px] font-semibold text-champagne-700 truncate">{cell.form}</p>
                   <p className="text-[10px] text-champagne-500 truncate">{cell.subkollektion}</p>
+                  <p className="text-[9px] text-champagne-400 font-mono truncate">{cell.sku}</p>
                 </div>
               </div>
             )) || []}
@@ -543,7 +1116,7 @@ function KollektionView({ kollektion, onBack, catalog, kundeName, cart, onAddCar
                       const cell = lookup[`${row.price}|||${row.form}|||${sub}`] || null;
                       return (
                         <div key={sub} style={{ width: CELL_W, minWidth: CELL_W }}>
-                          <ImageCell cell={cell} allCells={allCells} onAddCart={onAddCart} cartOpen={cartOpen} />
+                          <ImageCell cell={cell} allCells={allCells} onAddCart={onAddCart} cartOpen={cartOpen} cart={cart} onSetQty={onSetQty} allowStock={allowStock} lager={lager} />
                         </div>
                       );
                     })}
@@ -554,7 +1127,22 @@ function KollektionView({ kollektion, onBack, catalog, kundeName, cart, onAddCar
           </div>
         )}
 
-      {cartOpen && <CartView cartItems={cart} onClose={onCartClose} vertreterKontakt={vertreterKontakt} kundeName={kundeName} />}
+      {cartOpen && <CartView cartItems={cart} onClose={onCartClose} vertreterKontakt={vertreterKontakt} kundeName={kundeName} kundeId={kundeId} onSetQty={onSetQty} onRemove={(sku) => onSetQty(sku, 0)} onOrderComplete={onOrderComplete} allowOrder={allowOrder} />}
+
+      {/* Floating Cart Button — mobile */}
+      {cart.length > 0 && !cartOpen && (
+        <button
+          onClick={onCartOpen}
+          className="sm:hidden fixed bottom-6 right-6 z-40 w-14 h-14 bg-orange-500 text-white rounded-full shadow-lg shadow-orange-500/30 hover:bg-orange-600 active:scale-95 transition-all flex items-center justify-center"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/>
+          </svg>
+          <span className="absolute -top-1 -right-1 bg-white text-orange-600 text-[11px] font-bold rounded-full w-6 h-6 flex items-center justify-center shadow border border-orange-200">
+            {cart.reduce((s, i) => s + i.qty, 0)}
+          </span>
+        </button>
+      )}
       </main>
     </div>
   );
@@ -598,72 +1186,184 @@ function KollektionCard({ name, preview, onClick, byKollektion }) {
   );
 }
 
-function CollectionOverview({ catalog, kundeName, geaendert, onSelect, vertreterKontakt }) {
+function VertreterHeader({ vertreterKontakt }) {
+  if (!vertreterKontakt) return null;
+  return (
+    <div className="flex items-center gap-2">
+      {vertreterKontakt.bild && (
+        <img src={vertreterKontakt.bild} alt={vertreterKontakt.name} className="w-9 h-9 rounded-full object-cover" />
+      )}
+      <p className="text-sm text-champagne-800 font-medium">{vertreterKontakt.name}</p>
+      <div className="flex items-center gap-1.5 ml-1">
+        {vertreterKontakt.telefon && (
+          <a href={`tel:${vertreterKontakt.telefon.replace(/\s/g, '')}`} className="w-8 h-8 flex items-center justify-center rounded-full bg-champagne-100/80 text-champagne-600 hover:text-orange-600 hover:bg-orange-50 transition" title="Anrufen">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+            </svg>
+          </a>
+        )}
+        {vertreterKontakt.whatsapp && (
+          <a href={`https://wa.me/${vertreterKontakt.whatsapp.replace(/[^0-9+]/g, '')}`} target="_blank" rel="noopener noreferrer" className="w-8 h-8 flex items-center justify-center rounded-full bg-[#25D366]/10 text-[#25D366] hover:bg-[#25D366] hover:text-white transition" title="WhatsApp">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.272-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.67-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.076 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403c-5.523 0-10-4.477-10-10 0-1.77.46-3.43 1.27-4.87L2.05 2.05l4.87 1.22A9.93 9.93 0 0012.05 2c5.523 0 10 4.477 10 10s-4.477 10-10 10z"/>
+            </svg>
+          </a>
+        )}
+        {vertreterKontakt.email && (
+          <a href={`mailto:${vertreterKontakt.email}`} className="w-8 h-8 flex items-center justify-center rounded-full bg-champagne-100/80 text-champagne-600 hover:text-blue-600 hover:bg-blue-50 transition" title="Email">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="4" width="20" height="16" rx="2"/>
+              <path d="m22 7-10 5L2 7"/>
+            </svg>
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ListSection({ name, isRestocking, catalog: listCatalog, geaendert, onSelect, allowStock }) {
   const date = geaendert ? new Date(geaendert).toLocaleDateString('de-DE') : null;
+  // Wrap onSelect to include list-specific catalog and allowStock
+  const handleSelect = (kollName) => onSelect(kollName, listCatalog, allowStock);
+  return (
+    <div className="mb-10">
+      <div className="flex items-center gap-3 mb-1">
+        {isRestocking ? (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 text-[10px] font-semibold uppercase tracking-wider">
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2 22 12 12"/><path d="M7.5 15.5 17.5 5.5"/>
+              <path d="M7 17c1.3-1.4 2.8-2.1 4.5-2.1"/><path d="M6 13c1.4-1.4 3-2.1 5-2.1"/>
+            </svg>
+            Restocking
+          </span>
+        ) : (
+          <h3 className="font-display text-base text-champagne-800 tracking-wide">{name}</h3>
+        )}
+      </div>
+      <p className="text-xs text-champagne-500 mb-4">
+        {listCatalog.kollektionen.length} Kollektion{listCatalog.kollektionen.length !== 1 ? 'en' : ''} &middot; {listCatalog.cells.length} Artikel
+        {date && <span> &middot; {date}</span>}
+      </p>
+      <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+        {listCatalog.kollektionen.map(k => (
+          <KollektionCard
+            key={k}
+            name={k}
+            preview={listCatalog.kollektionPreviews[k]}
+            onClick={handleSelect}
+            byKollektion={listCatalog.byKollektion}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CollectionOverview({ catalog, catalogs, isOrderView, kundeName, geaendert, onSelect, vertreterKontakt, deepLinkUrlName, showAllLists, onShowAll }) {
+  const date = geaendert ? new Date(geaendert).toLocaleDateString('de-DE') : null;
+  const showMultiList = isOrderView && catalogs && catalogs.length > 0;
+
+  // Deep-link: find the targeted list by urlName
+  const deepLinkedList = deepLinkUrlName && showMultiList
+    ? catalogs.find(c => c.urlName === deepLinkUrlName)
+    : null;
+  const hasDeepLink = !!deepLinkedList;
+  // Filter: hide lists with showInOrder=false (unless they are the deep-linked list)
+  const otherLists = (hasDeepLink
+    ? catalogs.filter(c => c !== deepLinkedList)
+    : catalogs
+  ).filter(c => c.showInOrder !== false);
 
   return (
     <div className="min-h-screen bg-[#faf9f6]">
       <header className="glass border-b border-champagne-200/40 px-5 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div className="flex-1">
-            <p className="text-[10px] font-semibold tracking-[0.15em] text-champagne-400 uppercase mb-0.5">myKONPLOTT</p>
-            <h1 className="font-display text-xl text-champagne-800 tracking-wide">{kundeName}</h1>
-            {date && <p className="text-[10px] text-champagne-400 mt-0.5">Aktualisiert {date}</p>}
-          </div>
-          {vertreterKontakt && (
-            <div className="text-right flex items-center gap-3">
-              {vertreterKontakt.bild && (
-                <img src={vertreterKontakt.bild} alt={vertreterKontakt.name} className="w-10 h-10 rounded-full object-cover" />
-              )}
-              <div>
-                <p className="text-[10px] font-semibold tracking-[0.15em] text-champagne-400 uppercase mb-0.5">Ihr Vertreter</p>
-                <p className="text-sm text-champagne-800 font-medium">{vertreterKontakt.name}</p>
-                <div className="flex items-center gap-2 mt-1">
-                  {vertreterKontakt.whatsapp && (
-                    <a href={`https://wa.me/${vertreterKontakt.whatsapp.replace(/[^0-9+]/g, '')}`} target="_blank" rel="noopener noreferrer" className="text-champagne-600 hover:text-green-600 transition" title="WhatsApp">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.272-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.67-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.076 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421-7.403h-.004a9.87 9.87 0 00-4.968 1.495c-1.529.88-2.773 2.114-3.557 3.635-.779 1.524-1.188 3.199-1.188 4.905 0 1.339.209 2.647.616 3.897l.964-3.523c-.151-1.073-.23-2.18-.23-3.374 0-1.442.369-2.842 1.055-4.045.687-1.203 1.64-2.214 2.802-2.92 1.162-.707 2.485-1.08 3.85-1.08h.004c1.362 0 2.685.373 3.847 1.08 1.162.706 2.115 1.717 2.802 2.92.686 1.203 1.055 2.603 1.055 4.045 0 1.194-.079 2.301-.23 3.374l.964 3.523c.407-1.25.616-2.558.616-3.897 0-1.706-.409-3.381-1.188-4.905-.784-1.521-2.028-2.755-3.557-3.635a9.87 9.87 0 00-4.968-1.495"/>
-                      </svg>
-                    </a>
-                  )}
-                  {vertreterKontakt.email && (
-                    <a href={`mailto:${vertreterKontakt.email}`} className="text-champagne-600 hover:text-blue-600 transition" title="Email">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="2" y="4" width="20" height="16" rx="2"/>
-                        <path d="m22 7-10 5L2 7"/>
-                      </svg>
-                    </a>
-                  )}
-                  {vertreterKontakt.telefon && (
-                    <a href={`tel:${vertreterKontakt.telefon.replace(/\s/g, '')}`} className="text-champagne-600 hover:text-orange-600 transition" title="Telefon">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
-                      </svg>
-                    </a>
-                  )}
-                </div>
+          <div className="flex items-center gap-3 flex-1">
+            <img src="/konplott-logo-oval.svg" alt="" className="w-8 h-auto opacity-60 shrink-0 hidden sm:block" />
+            <div>
+              <div className="flex items-center gap-2 mb-0.5">
+                <img src="/konplott-wordmark.svg" alt="KONPLOTT" className="h-2.5 opacity-40" />
               </div>
+              <h1 className="font-display text-xl text-champagne-800 tracking-wide">{kundeName}</h1>
+              {!showMultiList && date && <p className="text-[10px] text-champagne-400 mt-0.5">Aktualisiert {date}</p>}
             </div>
-          )}
+          </div>
+          <VertreterHeader vertreterKontakt={vertreterKontakt} />
         </div>
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-8">
-        <p className="text-xs text-champagne-500 mb-6">
-          {catalog.kollektionen.length} Kollektion{catalog.kollektionen.length !== 1 ? 'en' : ''} &middot; {catalog.cells.length} Artikel
-        </p>
-        <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
-          {catalog.kollektionen.map(k => (
-            <KollektionCard
-              key={k}
-              name={k}
-              preview={catalog.kollektionPreviews[k]}
-              onClick={onSelect}
-              byKollektion={catalog.byKollektion}
-            />
-          ))}
-        </div>
+        {showMultiList ? (
+          <>
+            {/* Deep-linked list shown first, regardless of priority */}
+            {hasDeepLink && (
+              <ListSection
+                name={deepLinkedList.name}
+                isRestocking={deepLinkedList.isRestocking}
+                catalog={deepLinkedList.catalog}
+                geaendert={deepLinkedList.geaendert}
+                onSelect={onSelect}
+                allowStock={deepLinkedList.allowStock}
+              />
+            )}
+
+            {/* Show more button when deep-linked and other lists exist */}
+            {hasDeepLink && !showAllLists && otherLists.length > 0 && (
+              <div className="flex justify-center mb-10">
+                <button
+                  onClick={onShowAll}
+                  className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-champagne-100 hover:bg-champagne-200 text-champagne-700 text-sm font-medium transition-colors border border-champagne-200/60"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M6 9l6 6 6-6"/>
+                  </svg>
+                  {otherLists.length} weitere Liste{otherLists.length !== 1 ? 'n' : ''} anzeigen
+                </button>
+              </div>
+            )}
+
+            {/* Other lists: shown always (no deep link) or after "show more" */}
+            {(!hasDeepLink || showAllLists) && otherLists.map((entry, idx) => (
+              <ListSection
+                key={idx}
+                name={entry.name}
+                isRestocking={entry.isRestocking}
+                catalog={entry.catalog}
+                geaendert={entry.geaendert}
+                onSelect={onSelect}
+                allowStock={entry.allowStock}
+              />
+            ))}
+          </>
+        ) : (
+          <>
+            <h2 className="font-display text-lg text-champagne-800 tracking-wide mb-1">Restocking</h2>
+            <p className="text-xs text-champagne-500 mb-6">
+              {catalog.kollektionen.length} Kollektion{catalog.kollektionen.length !== 1 ? 'en' : ''} &middot; {catalog.cells.length} Artikel
+            </p>
+            <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+              {catalog.kollektionen.map(k => (
+                <KollektionCard
+                  key={k}
+                  name={k}
+                  preview={catalog.kollektionPreviews[k]}
+                  onClick={(name) => onSelect(name, catalog, true)}
+                  byKollektion={catalog.byKollektion}
+                />
+              ))}
+            </div>
+          </>
+        )}
       </main>
+
+      {/* Brand Footer */}
+      <footer className="py-8 text-center">
+        <div className="flex items-center justify-center gap-2 opacity-30">
+          <img src="/konplott-logo-oval.svg" alt="" className="w-5 h-auto" />
+          <img src="/konplott-wordmark.svg" alt="" className="h-2 opacity-70" />
+        </div>
+      </footer>
     </div>
   );
 }
@@ -672,9 +1372,12 @@ function LoadingScreen() {
   return (
     <div className="min-h-screen bg-[#faf9f6]">
       <header className="glass border-b border-champagne-200/40 px-5 py-4">
-        <div className="max-w-6xl mx-auto">
-          <Skeleton className="h-3 w-20 mb-1" />
-          <Skeleton className="h-6 w-48" />
+        <div className="max-w-6xl mx-auto flex items-center gap-3">
+          <img src="/konplott-logo-oval.svg" alt="" className="w-8 h-auto opacity-40 animate-pulse" />
+          <div>
+            <img src="/konplott-wordmark.svg" alt="KONPLOTT" className="h-2.5 opacity-30 mb-1" />
+            <Skeleton className="h-5 w-40" />
+          </div>
         </div>
       </header>
       <main className="max-w-6xl mx-auto px-4 py-8">
@@ -694,48 +1397,804 @@ function LoadingScreen() {
   );
 }
 
-export default function App() {
+// ─── Katalog: Lager-Picker ────────────────────────────────────────────────────
+
+function LagerPicker({ lager, kundeName, onSelect }) {
+  return (
+    <div className="min-h-screen bg-[#faf9f6]">
+      <header className="glass border-b border-champagne-200/40 px-5 py-4">
+        <div className="max-w-3xl mx-auto flex items-center gap-3">
+          <img src="/konplott-logo-oval.svg" alt="" className="w-8 h-auto opacity-60 shrink-0" />
+          <div>
+            <img src="/konplott-wordmark.svg" alt="KONPLOTT" className="h-2.5 opacity-40 mb-0.5" />
+            <h1 className="font-display text-xl text-champagne-800 tracking-wide">{kundeName}</h1>
+          </div>
+        </div>
+      </header>
+      <main className="max-w-3xl mx-auto px-4 py-10">
+        <h2 className="font-display text-lg text-champagne-800 tracking-wide mb-1">Lager wählen</h2>
+        <p className="text-xs text-champagne-500 mb-6">Wähle ein Lager, um den lieferbaren Katalog anzusehen.</p>
+        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+          {lager.map(l => (
+            <button
+              key={l.id || l.name}
+              onClick={() => onSelect(l)}
+              className="text-left p-5 rounded-2xl bg-white border border-champagne-100/80 hover:border-champagne-300/60 hover:shadow-[0_12px_40px_rgba(0,0,0,0.08)] transition-all active:scale-[0.98]"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-champagne-100 flex items-center justify-center text-champagne-500 shrink-0">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 9l9-6 9 6v11a1 1 0 01-1 1H4a1 1 0 01-1-1z"/><path d="M9 21V12h6v9"/>
+                  </svg>
+                </div>
+                <div className="min-w-0">
+                  <p className="font-display text-base text-champagne-800 truncate">{l.name}</p>
+                  {l.id && <p className="text-[10px] text-champagne-400 font-mono">Lager-ID {l.id}</p>}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// ─── Katalog: Setergänzung für ALLE ───────────────────────────────────────────
+
+function findCatalogComplements(cell, cells) {
+  return cells.filter(c =>
+    c.kollektion === cell.kollektion &&
+    c.subkollektion === cell.subkollektion &&
+    c.form !== cell.form &&
+    c.sku !== cell.sku
+  );
+}
+
+function SetComplementsAllModal({ cells, allCells, onClose, onAddCart, cart, onSetQty }) {
+  const sections = useMemo(() => cells
+    .map(base => ({ base, complements: findCatalogComplements(base, allCells) }))
+    .filter(s => s.complements.length > 0), [cells, allCells]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50">
+      <div className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl max-h-[85vh] overflow-hidden flex flex-col">
+        <div className="sticky top-0 bg-white border-b border-champagne-200/40 px-5 py-3.5 flex items-center justify-between">
+          <div>
+            <h2 className="font-display text-lg text-champagne-800">Setergänzung für alle</h2>
+            <p className="text-xs text-champagne-500 mt-0.5">{sections.length} Artikel mit Ergänzungen</p>
+          </div>
+          <button onClick={onClose} className="text-champagne-400 hover:text-champagne-700">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+          </button>
+        </div>
+        <div className="overflow-y-auto flex-1 p-4 space-y-5">
+          {sections.length === 0 && (
+            <p className="text-center text-champagne-500 text-sm py-6">Keine Setergänzungen im Lager gefunden.</p>
+          )}
+          {sections.map(({ base, complements }) => (
+            <div key={base.sku}>
+              <div className="flex items-center gap-2 mb-2">
+                {base.imageId && <img src={imgUrl(base.imageId, 80)} alt="" className="w-9 h-9 object-cover rounded" />}
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-champagne-800 truncate">{base.kollektion} · {base.form}</p>
+                  <p className="text-[10px] text-champagne-400">{base.subkollektion} · {complements.length} Ergänzungen</p>
+                </div>
+              </div>
+              <div className="grid gap-2 pl-2 border-l-2 border-champagne-100">
+                {complements.map(c => {
+                  const inCart = cart?.find(item => item.sku === c.sku);
+                  return (
+                    <div key={c.sku} className="flex gap-3 p-2.5 bg-champagne-50 rounded-lg border border-champagne-200/40">
+                      <button onClick={() => onAddCart(c)} className="flex-1 flex gap-3 text-left">
+                        {c.imageId && <img src={imgUrl(c.imageId, 100)} alt="" className="w-16 h-16 object-cover rounded" />}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-champagne-800 text-sm truncate">{c.form}</p>
+                          <p className="text-xs text-champagne-600 truncate">{c.subkollektion}</p>
+                          <p className="text-[10px] text-champagne-400 font-mono mt-0.5">{c.sku}</p>
+                          {fmtPrice(c.price) && <p className="text-sm font-bold text-champagne-700 mt-0.5">{fmtPrice(c.price)}</p>}
+                        </div>
+                      </button>
+                      {inCart ? (
+                        <div className="flex items-center gap-1 self-center">
+                          <button onClick={() => onSetQty(c.sku, inCart.qty - 1)} className="w-7 h-7 flex items-center justify-center rounded-full bg-champagne-200/60 text-champagne-700 hover:bg-champagne-300 text-sm font-bold">−</button>
+                          <span className="w-5 text-center font-bold text-champagne-800 text-xs">{inCart.qty}</span>
+                          <button onClick={() => onSetQty(c.sku, inCart.qty + 1)} className="w-7 h-7 flex items-center justify-center rounded-full bg-champagne-200/60 text-champagne-700 hover:bg-champagne-300 text-sm font-bold">+</button>
+                        </div>
+                      ) : (
+                        <button onClick={() => onAddCart(c)} className="px-2 py-1 rounded text-xs font-semibold text-champagne-700 bg-champagne-100 hover:bg-champagne-200 self-center whitespace-nowrap">hinzufügen</button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Katalog: Die N teuersten Artikel ─────────────────────────────────────────
+
+function KatalogTeuerste({ cells, allCells, lager, cart, onAddCart, onSetQty, defaultCount = 50 }) {
+  const [count, setCount] = useState(defaultCount);
+  const [complementCell, setComplementCell] = useState(null);
+  const [showAll, setShowAll] = useState(false);
+
+  const lookupCells = allCells || cells;
+  const sorted = useMemo(() => [...cells].sort((a, b) => (b.price || 0) - (a.price || 0)), [cells]);
+  const top = count === -1 ? sorted : sorted.slice(0, count);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-champagne-500">Anzahl</label>
+          <select
+            value={count}
+            onChange={e => setCount(Number(e.target.value))}
+            className="bg-white border border-champagne-200 rounded-lg px-3 py-1.5 text-sm text-champagne-800 outline-none focus:border-champagne-400"
+          >
+            {[20, 50, 100, 200].map(n => <option key={n} value={n}>{n} teuerste</option>)}
+            <option value={-1}>Alle ({sorted.length})</option>
+          </select>
+        </div>
+        <button
+          onClick={() => setShowAll(true)}
+          className="px-4 py-2 rounded-full bg-champagne-700 text-white text-sm font-semibold hover:bg-champagne-800 transition-colors"
+        >
+          Setergänzung für alle anzeigen
+        </button>
+      </div>
+
+      <div className="grid gap-2">
+        {top.map((cell, idx) => {
+          const inCart = cart?.find(item => item.sku === cell.sku);
+          return (
+            <div key={cell.sku} className="flex gap-3 p-3 bg-white rounded-xl border border-champagne-100/80 items-center">
+              <span className="text-[11px] font-bold text-champagne-300 w-6 text-center shrink-0">{idx + 1}</span>
+              {cell.imageId
+                ? <img src={imgUrl(cell.imageId, 120)} alt="" className="w-16 h-16 object-cover rounded-lg shrink-0" />
+                : <div className="w-16 h-16 rounded-lg bg-champagne-50 shrink-0" />}
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-champagne-800 text-sm truncate">{cell.kollektion} · {cell.form}</p>
+                <p className="text-xs text-champagne-500 truncate">{cell.subkollektion}</p>
+                <p className="text-[10px] text-champagne-400 font-mono">{cell.sku}</p>
+                {fmtPrice(cell.price) && <p className="text-sm font-bold text-champagne-700 mt-0.5">{fmtPrice(cell.price)}</p>}
+              </div>
+              <div className="flex flex-col gap-1.5 shrink-0">
+                <button
+                  onClick={() => setComplementCell(cell)}
+                  className="px-3 py-1 text-[11px] font-medium text-champagne-700 bg-champagne-100/80 rounded-md hover:bg-champagne-200 transition-colors whitespace-nowrap"
+                >
+                  Setergänzung
+                </button>
+                {inCart ? (
+                  <div className="flex items-center gap-1 justify-center">
+                    <button onClick={() => onSetQty(cell.sku, inCart.qty - 1)} className="w-6 h-6 flex items-center justify-center rounded-full bg-champagne-200/60 text-champagne-700 hover:bg-champagne-300 text-xs font-bold">−</button>
+                    <span className="w-4 text-center font-bold text-champagne-800 text-[11px]">{inCart.qty}</span>
+                    <button onClick={() => onSetQty(cell.sku, inCart.qty + 1)} className="w-6 h-6 flex items-center justify-center rounded-full bg-champagne-200/60 text-champagne-700 hover:bg-champagne-300 text-xs font-bold">+</button>
+                  </div>
+                ) : (
+                  <button onClick={() => onAddCart(cell)} className="px-3 py-1 text-[11px] font-medium text-amber-700 bg-amber-100/80 rounded-md hover:bg-amber-200 transition-colors whitespace-nowrap">🛒 Korb</button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {complementCell && (
+        <SetComplementsModal
+          cell={complementCell}
+          allCells={lookupCells}
+          onClose={() => setComplementCell(null)}
+          onAddCart={onAddCart}
+          cart={cart}
+          onSetQty={onSetQty}
+          allowStock={false}
+          lager={lager}
+        />
+      )}
+      {showAll && (
+        <SetComplementsAllModal
+          cells={top}
+          allCells={lookupCells}
+          onClose={() => setShowAll(false)}
+          onAddCart={onAddCart}
+          cart={cart}
+          onSetQty={onSetQty}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Katalog: Setansicht (Lead-Artikel + Setergänzung) ────────────────────────
+
+function SetansichtView({ cells, cart, onAddCart, onSetQty }) {
+  // Ein "Set" (Parure) = gleiche Kollektion + SubKollektion, verschiedene Formen
+  const sets = useMemo(() => {
+    const bySub = {};
+    cells.forEach(c => { (bySub[c.subkollektion] = bySub[c.subkollektion] || []).push(c); });
+    return Object.entries(bySub)
+      .map(([sub, items]) => {
+        const ordered = [...items].sort((a, b) => (b.price || 0) - (a.price || 0));
+        return {
+          sub,
+          lead: ordered[0],
+          rest: ordered.slice(1),
+          all: ordered,
+          summe: ordered.reduce((s, c) => s + (c.price || 0), 0),
+        };
+      })
+      .sort((a, b) => (b.lead?.price || 0) - (a.lead?.price || 0));
+  }, [cells]);
+
+  const addWholeSet = (set) => set.all.forEach(c => {
+    const inCart = cart?.find(i => i.sku === c.sku);
+    if (!inCart) onAddCart(c);
+  });
+
+  const PieceQty = ({ c }) => {
+    const inCart = cart?.find(i => i.sku === c.sku);
+    if (inCart) {
+      return (
+        <div className="flex items-center gap-1 justify-center mt-1">
+          <button onClick={() => onSetQty(c.sku, inCart.qty - 1)} className="w-6 h-6 flex items-center justify-center rounded-full bg-champagne-200/60 text-champagne-700 hover:bg-champagne-300 text-xs font-bold">−</button>
+          <span className="w-4 text-center font-bold text-champagne-800 text-[11px]">{inCart.qty}</span>
+          <button onClick={() => onSetQty(c.sku, inCart.qty + 1)} className="w-6 h-6 flex items-center justify-center rounded-full bg-champagne-200/60 text-champagne-700 hover:bg-champagne-300 text-xs font-bold">+</button>
+        </div>
+      );
+    }
+    return (
+      <button onClick={() => onAddCart(c)} className="mt-1 w-full px-2 py-1 text-[10px] font-medium text-amber-700 bg-amber-100/80 rounded-md hover:bg-amber-200 transition-colors">🛒 einzeln</button>
+    );
+  };
+
+  const Piece = ({ c, lead }) => (
+    <div className={`shrink-0 ${lead ? 'w-40' : 'w-28'} `}>
+      {c.imageId
+        ? <img src={imgUrl(c.imageId, lead ? 320 : 200)} alt="" className={`w-full ${lead ? 'aspect-square' : 'aspect-square'} object-cover rounded-xl border ${lead ? 'border-champagne-300' : 'border-champagne-100'}`} />
+        : <div className={`w-full aspect-square rounded-xl bg-champagne-50 border border-champagne-100`} />}
+      <p className="text-[11px] font-semibold text-champagne-800 truncate mt-1">{c.form}</p>
+      {fmtPrice(c.price) && <p className="text-[11px] font-bold text-champagne-700">{fmtPrice(c.price)}</p>}
+      <p className="text-[9px] text-champagne-400 font-mono truncate">{c.sku}</p>
+      <PieceQty c={c} />
+    </div>
+  );
+
+  return (
+    <div className="space-y-5">
+      {sets.map(set => (
+        <div key={set.sub} className="bg-white rounded-2xl border border-champagne-100/80 p-4">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="min-w-0">
+              <p className="font-display text-base text-champagne-800 truncate">{set.sub}</p>
+              <p className="text-[11px] text-champagne-500">{set.all.length} Teile · Set-Summe {fmtPrice(set.summe) || '—'}</p>
+            </div>
+            <button
+              onClick={() => addWholeSet(set)}
+              className="px-3 py-1.5 rounded-full bg-champagne-700 text-white text-xs font-semibold hover:bg-champagne-800 transition-colors whitespace-nowrap shrink-0"
+            >
+              + ganzes Set
+            </button>
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            <Piece c={set.lead} lead />
+            {set.rest.length > 0 && <div className="w-px bg-champagne-200/60 shrink-0" />}
+            {set.rest.map(c => <Piece key={c.sku} c={c} />)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Katalog: Kollektion-Detail (Alle / Setansicht) ───────────────────────────
+
+function KatalogKollektionDetail({ kollektion, cells, allCells, lager, onBack, cart, onAddCart, onSetQty, onCartOpen }) {
+  const [view, setView] = useState('alle'); // 'alle' | 'set'
+  return (
+    <div className="min-h-screen bg-[#faf9f6]">
+      <header className="glass border-b border-champagne-200/40 px-5 py-3.5 sticky top-0 z-40">
+        <div className="max-w-6xl mx-auto flex items-center gap-3">
+          <button onClick={onBack} className="flex items-center gap-1.5 text-champagne-500 hover:text-champagne-700 text-xs font-semibold shrink-0 group">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="group-hover:-translate-x-0.5 transition-transform"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Übersicht
+          </button>
+          <div className="w-px h-5" style={{ background: 'linear-gradient(to bottom, transparent, #d4c9b8, transparent)' }} />
+          <h1 className="font-display text-base text-champagne-800 truncate tracking-wide">{kollektion}</h1>
+          <div className="ml-auto flex items-center gap-2 shrink-0">
+            <div className="flex items-center bg-champagne-50 rounded-xl border border-champagne-200/60 overflow-hidden">
+              <button onClick={() => setView('alle')} className={`px-3 py-1.5 text-xs font-semibold transition-all ${view === 'alle' ? 'bg-champagne-700 text-white' : 'text-champagne-500 hover:text-champagne-700'}`}>Alle</button>
+              <button onClick={() => setView('set')} className={`px-3 py-1.5 text-xs font-semibold transition-all ${view === 'set' ? 'bg-champagne-700 text-white' : 'text-champagne-500 hover:text-champagne-700'}`}>Setansicht</button>
+            </div>
+            {cart.length > 0 && (
+              <button onClick={onCartOpen} className="relative flex items-center gap-1.5 px-4 py-2 bg-orange-500 text-white rounded-xl hover:bg-orange-600 text-sm font-bold transition-all shadow-md shadow-orange-500/25">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg>
+                <span className="text-base font-bold">{cart.reduce((s, i) => s + i.qty, 0)}</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
+      <main className="max-w-6xl mx-auto px-4 py-6">
+        {view === 'alle' ? (
+          <KatalogTeuerste cells={cells} allCells={allCells} lager={lager} cart={cart} onAddCart={onAddCart} onSetQty={onSetQty} defaultCount={-1} />
+        ) : (
+          <SetansichtView cells={cells} cart={cart} onAddCart={onAddCart} onSetQty={onSetQty} />
+        )}
+      </main>
+    </div>
+  );
+}
+
+// ─── Katalog: Übersicht (Kollektionen / Teuerste) ─────────────────────────────
+
+function KatalogKollektionCard({ name, preview, onClick, byKollektion }) {
+  const kcells = byKollektion[name] || [];
+  const total = kcells.length;
+  const forms = new Set(kcells.map(c => c.form)).size;
+  return (
+    <div className="group relative rounded-2xl overflow-hidden hover:shadow-[0_12px_40px_rgba(0,0,0,0.1)] transition-all duration-500 cursor-pointer bg-white border border-champagne-100/80 hover:border-champagne-300/60">
+      <button onClick={() => onClick(name)} className="text-left w-full active:scale-[0.98] transition-transform duration-200">
+        <div className="overflow-hidden aspect-square w-full bg-champagne-50 relative">
+          {preview?.image ? (
+            <img src={preview.image} alt={name} className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110" loading="lazy" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-champagne-200">
+              <svg width="40" height="40" viewBox="0 0 48 48" fill="none"><rect x="8" y="8" width="32" height="32" rx="4" stroke="currentColor" strokeWidth="1.5"/></svg>
+            </div>
+          )}
+        </div>
+        <div className="px-3.5 py-3">
+          <p className="font-display text-base text-champagne-800 leading-snug tracking-wide truncate">{name}</p>
+          <p className="text-[9px] text-champagne-400 leading-tight mt-0.5 font-medium tracking-wide">
+            {forms} verschiedene Artikel &middot; {total} Artikel gesamt
+          </p>
+        </div>
+      </button>
+    </div>
+  );
+}
+
+function KatalogOverview({ catalog, lager, kundeName, onChangeLager, onSelectKollektion, cart, onCartOpen, onAddCart, onSetQty, multiLager, savedLists = [], onLoadSelektion }) {
+  const [mode, setMode] = useState('kollektionen'); // 'kollektionen' | 'teuerste'
+  return (
+    <div className="min-h-screen bg-[#faf9f6]">
+      <header className="glass border-b border-champagne-200/40 px-5 py-4 sticky top-0 z-40">
+        <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <img src="/konplott-logo-oval.svg" alt="" className="w-8 h-auto opacity-60 shrink-0 hidden sm:block" />
+            <div className="min-w-0">
+              <h1 className="font-display text-lg text-champagne-800 tracking-wide truncate">{kundeName}</h1>
+              <p className="text-[11px] text-champagne-500 truncate">
+                <span className="font-semibold">{lager.name}</span> &middot; {catalog.cells.length} Items in {catalog.kollektionen.length} Kollektionen
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {multiLager && (
+              <button onClick={onChangeLager} className="text-xs font-semibold text-champagne-500 hover:text-champagne-700 px-3 py-1.5 rounded-full bg-champagne-50 border border-champagne-200/60">
+                Lager wechseln
+              </button>
+            )}
+            {cart.length > 0 && (
+              <button onClick={onCartOpen} className="relative flex items-center gap-1.5 px-4 py-2 bg-orange-500 text-white rounded-xl hover:bg-orange-600 text-sm font-bold transition-all shadow-md shadow-orange-500/25">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg>
+                <span className="text-base font-bold">{cart.reduce((s, i) => s + i.qty, 0)}</span>
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="max-w-6xl mx-auto mt-3 flex gap-2">
+          <button
+            onClick={() => setMode('kollektionen')}
+            className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${mode === 'kollektionen' ? 'bg-champagne-700 text-white' : 'bg-champagne-50 text-champagne-500 hover:text-champagne-700 border border-champagne-200/60'}`}
+          >
+            Alle Kollektionen
+          </button>
+          <button
+            onClick={() => setMode('teuerste')}
+            className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${mode === 'teuerste' ? 'bg-champagne-700 text-white' : 'bg-champagne-50 text-champagne-500 hover:text-champagne-700 border border-champagne-200/60'}`}
+          >
+            Teuerste Artikel
+          </button>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-4 py-8">
+        {savedLists.length > 0 && (
+          <div className="mb-6">
+            <p className="text-[11px] font-semibold text-champagne-500 uppercase tracking-wider mb-2">Gespeicherte Listen</p>
+            <div className="flex flex-wrap gap-2">
+              {savedLists.map(sel => (
+                <button
+                  key={sel.id}
+                  onClick={() => onLoadSelektion && onLoadSelektion(sel)}
+                  className="inline-flex items-center gap-2 bg-white border border-champagne-200/70 rounded-full pl-3 pr-3.5 py-1.5 text-xs text-champagne-700 hover:border-champagne-400 hover:shadow-sm transition-all"
+                  title="In Auswahl laden"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.3 2.3M17 13l2.3 2.3M9 21a1 1 0 100-2 1 1 0 000 2zm8 0a1 1 0 100-2 1 1 0 000 2z"/></svg>
+                  <span className="font-semibold">{sel.name}</span>
+                  <span className="text-champagne-400">{(sel.artikel || []).length}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {mode === 'kollektionen' ? (
+          <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+            {catalog.kollektionen.map(k => (
+              <KatalogKollektionCard
+                key={k}
+                name={k}
+                preview={catalog.kollektionTopPreviews?.[k] || catalog.kollektionPreviews?.[k]}
+                onClick={onSelectKollektion}
+                byKollektion={catalog.byKollektion}
+              />
+            ))}
+          </div>
+        ) : (
+          <KatalogTeuerste cells={catalog.cells} allCells={catalog.cells} lager={lager.name} cart={cart} onAddCart={onAddCart} onSetQty={onSetQty} />
+        )}
+      </main>
+    </div>
+  );
+}
+
+// ─── Katalog: Haupt-Container (eigene Route /katalogs/{kundeId}) ──────────────
+
+function KatalogApp() {
+  const kundeId = (() => {
+    const m = window.location.pathname.match(/\/katalogs\/([^/]+)/);
+    return m ? m[1] : null;
+  })();
+
+  const [pinOk, setPinOk] = useState(() => {
+    if (!kundeId) return false;
+    return sessionStorage.getItem(`pin_${kundeId}`) === 'ok';
+  });
+  const [lagerList, setLagerList] = useState(null); // null = loading
+  const [kundeName, setKundeName] = useState('');
+  const [vertreterName, setVertreterName] = useState('');
+  const [vertreterKontakt, setVertreterKontakt] = useState(null);
+  const [error, setError] = useState(null);
+
+  const [selectedLager, setSelectedLager] = useState(null);
   const [catalog, setCatalog] = useState(null);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [selectedKollektion, setSelectedKollektion] = useState(null);
+
+  const [cart, setCart] = useState([]);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [savedLists, setSavedLists] = useState([]);
+
+  // Gespeicherte Selektionen laden
+  const loadSavedLists = useMemo(() => () => {
+    if (!kundeId) return;
+    fetch(`${KONAGENT_URL}/api/public/katalog-selektion/${kundeId}?t=${Date.now()}`)
+      .then(r => r.ok ? r.json() : { selektionen: [] })
+      .then(d => setSavedLists(d.selektionen || []))
+      .catch(() => {});
+  }, [kundeId]);
+
+  // 1. Erlaubte Läger laden (nach PIN)
+  useEffect(() => {
+    if (!kundeId || !pinOk) return;
+    let cancelled = false;
+    fetch(`${KONAGENT_URL}/api/public/katalog-lager/${kundeId}?t=${Date.now()}`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(data => {
+        if (cancelled) return;
+        setKundeName(data.kundeName || kundeId);
+        setVertreterName(data.vertreterName || '');
+        const lager = data.lager || [];
+        setLagerList(lager);
+        if (lager.length === 1) setSelectedLager(lager[0]);
+      })
+      .catch(e => { if (!cancelled) { setError(e.message); setLagerList([]); } });
+    return () => { cancelled = true; };
+  }, [kundeId, pinOk]);
+
+  // 1b. Gespeicherte Listen laden (nach PIN)
+  useEffect(() => {
+    if (!kundeId || !pinOk) return;
+    loadSavedLists();
+  }, [kundeId, pinOk, loadSavedLists]);
+
+  // 2. Vertreter-Kontakt laden
+  useEffect(() => {
+    if (!vertreterName) return;
+    let cancelled = false;
+    fetch(`${KONAGENT_URL}/api/public/vertreter`)
+      .then(r => r.ok ? r.json() : [])
+      .then(kontakte => {
+        if (cancelled) return;
+        const v = (kontakte || []).find(k => k.gebiet.toLowerCase() === vertreterName.toLowerCase());
+        if (v) setVertreterKontakt(v);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [vertreterName]);
+
+  // 3. Katalog des gewählten Lagers laden
+  useEffect(() => {
+    if (!kundeId || !selectedLager) { setCatalog(null); return; }
+    let cancelled = false;
+    setCatalogLoading(true);
+    setSelectedKollektion(null);
+    fetch(`${KONAGENT_URL}/api/public/katalog/${kundeId}?lager=${encodeURIComponent(selectedLager.name)}&t=${Date.now()}`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(data => {
+        if (cancelled) return;
+        setCatalog(buildCatalog(data.artikel || []));
+        setCatalogLoading(false);
+      })
+      .catch(e => { if (!cancelled) { setError(e.message); setCatalogLoading(false); } });
+    return () => { cancelled = true; };
+  }, [kundeId, selectedLager]);
+
+  const handleAddCart = (cell) => {
+    setCart(prev => {
+      const existing = prev.find(item => item.sku === cell.sku);
+      if (existing) return prev.map(item => item.sku === cell.sku ? { ...item, qty: item.qty + 1 } : item);
+      return [...prev, { sku: cell.sku, form: cell.form, qty: 1, imageId: cell.imageId }];
+    });
+  };
+  const handleSetQty = (sku, qty) => {
+    if (qty <= 0) setCart(prev => prev.filter(item => item.sku !== sku));
+    else setCart(prev => prev.map(item => item.sku === sku ? { ...item, qty } : item));
+  };
+
+  // Selektion als benannte Liste speichern
+  const handleSaveList = async (name) => {
+    const artikel = cart.map(i => ({ ean: i.sku, form: i.form, menge: i.qty, imageId: i.imageId || '' }));
+    const res = await fetch(`${KONAGENT_URL}/api/public/katalog-selektion/${kundeId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, lagerName: selectedLager?.name || '', artikel }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `Fehler ${res.status}`);
+    }
+    loadSavedLists();
+  };
+
+  // Gespeicherte Liste zurück in die Auswahl laden
+  const handleLoadSelektion = (sel) => {
+    setCart(prev => {
+      const next = [...prev];
+      (sel.artikel || []).forEach(a => {
+        const existing = next.find(i => i.sku === a.ean);
+        if (existing) existing.qty += a.menge || 1;
+        else next.push({ sku: a.ean, form: a.form, qty: a.menge || 1, imageId: a.imageId });
+      });
+      return next;
+    });
+    setCartOpen(true);
+  };
+
+  // ── Render ──
+  if (kundeId && !pinOk) return <PinScreen kundeId={kundeId} onSuccess={() => setPinOk(true)} />;
+  if (!kundeId) return <NotFound message="Keine Kunden-ID in der URL. Erwartet: /katalogs/{kundeId}" />;
+  if (lagerList === null) return <LoadingScreen />;
+  if (error && !catalog) return <NotFound message={error} />;
+  if (lagerList.length === 0) return <NotFound message="Für diesen Kunden sind keine Läger freigegeben. Bitte wende dich an deinen Vertreter." />;
+
+  if (!selectedLager) {
+    return <LagerPicker lager={lagerList} kundeName={kundeName} onSelect={setSelectedLager} />;
+  }
+  if (catalogLoading || !catalog) return <LoadingScreen />;
+
+  if (selectedKollektion) {
+    return (
+      <>
+        <KatalogKollektionDetail
+          kollektion={selectedKollektion}
+          cells={catalog.byKollektion[selectedKollektion] || []}
+          allCells={catalog.cells}
+          lager={selectedLager.name}
+          onBack={() => setSelectedKollektion(null)}
+          cart={cart}
+          onAddCart={handleAddCart}
+          onSetQty={handleSetQty}
+          onCartOpen={() => setCartOpen(true)}
+        />
+        {cartOpen && (
+          <CartView
+            cartItems={cart}
+            onClose={() => setCartOpen(false)}
+            vertreterKontakt={vertreterKontakt}
+            kundeName={kundeName}
+            kundeId={kundeId}
+            onSetQty={handleSetQty}
+            onRemove={(sku) => handleSetQty(sku, 0)}
+            onOrderComplete={() => {}}
+            allowOrder={false}
+            onSaveList={handleSaveList}
+          />
+        )}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <KatalogOverview
+        catalog={catalog}
+        lager={selectedLager}
+        kundeName={kundeName}
+        multiLager={lagerList.length > 1}
+        onChangeLager={() => { setSelectedLager(null); setCatalog(null); }}
+        onSelectKollektion={(name) => setSelectedKollektion(name)}
+        cart={cart}
+        onCartOpen={() => setCartOpen(true)}
+        onAddCart={handleAddCart}
+        onSetQty={handleSetQty}
+        savedLists={savedLists}
+        onLoadSelektion={handleLoadSelektion}
+      />
+      {/* Katalog-Modus: Warenkorb dient nur der Selektion (kein verbindliches Bestellen) */}
+      {cartOpen && (
+        <CartView
+          cartItems={cart}
+          onClose={() => setCartOpen(false)}
+          vertreterKontakt={vertreterKontakt}
+          kundeName={kundeName}
+          kundeId={kundeId}
+          onSetQty={handleSetQty}
+          onRemove={(sku) => handleSetQty(sku, 0)}
+          onOrderComplete={() => {}}
+          allowOrder={false}
+          onSaveList={handleSaveList}
+        />
+      )}
+      {/* Floating Cart Button (mobil) */}
+      {cart.length > 0 && !cartOpen && (
+        <button
+          onClick={() => setCartOpen(true)}
+          className="sm:hidden fixed bottom-6 right-6 z-40 w-14 h-14 bg-orange-500 text-white rounded-full shadow-lg shadow-orange-500/30 hover:bg-orange-600 active:scale-95 transition-all flex items-center justify-center"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg>
+          <span className="absolute -top-1 -right-1 bg-white text-orange-600 text-[11px] font-bold rounded-full w-6 h-6 flex items-center justify-center shadow border border-orange-200">{cart.reduce((s, i) => s + i.qty, 0)}</span>
+        </button>
+      )}
+    </>
+  );
+}
+
+function MainApp() {
+  const [catalog, setCatalog] = useState(null);
+  const [catalogs, setCatalogs] = useState([]); // multi-list: [{name, catalog, geaendert}]
   const [kundeName, setKundeName] = useState('');
   const [geaendert, setGeaendert] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedKollektion, setSelectedKollektion] = useState(null);
+  const [selectedListCatalog, setSelectedListCatalog] = useState(null);
+  const [selectedListAllowStock, setSelectedListAllowStock] = useState(true);
   const [cart, setCart] = useState([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [vertreterKontakt, setVertreterKontakt] = useState(null);
   const [vertreterName, setVertreterName] = useState('');
+  const [showAllLists, setShowAllLists] = useState(false);
 
   const kundeId = (() => {
-    const m = window.location.pathname.match(/\/restocking\/([^/]+)/);
-    return m ? m[1] : null;
+    const m = window.location.pathname.match(/\/(restocking|order)\/([^/]+)/);
+    return m ? m[2] : null;
   })();
+  const isOrderView = window.location.pathname.startsWith('/order/');
+
+  // Deep-link: ?ListenName in query string → show that list first
+  const deepLinkUrlName = (() => {
+    const search = window.location.search;
+    if (!search || search.length < 2) return null;
+    // The urlName is the query string without the leading '?', e.g. ?summer-vibes → "summer-vibes"
+    return search.slice(1).split('&')[0].split('=')[0] || null;
+  })();
+
+  const [pinOk, setPinOk] = useState(() => {
+    if (!kundeId) return false;
+    return sessionStorage.getItem(`pin_${kundeId}`) === 'ok';
+  });
 
   useEffect(() => {
     if (!kundeId) {
-      setError('Keine Kunden-ID in der URL gefunden. Erwartet: /restocking/{kundeId}');
+      setError('Keine Kunden-ID in der URL gefunden. Erwartet: /restocking/{kundeId} oder /order/{kundeId}');
       setLoading(false);
       return;
     }
 
-    const url = `${KONAGENT_URL}/api/public/restocking/${kundeId}?t=${Date.now()}`;
-    fetch(url)
-      .then(res => {
-        if (!res.ok) throw new Error(res.status === 404 ? 'not_found' : `HTTP ${res.status}`);
-        return res.json();
-      })
-      .then(data => {
-        setKundeName(data.kundeName || kundeId);
-        setGeaendert(data.geaendert);
-        setVertreterName(data.vertreterName || '');
-        setCatalog(buildCatalog(data.artikel || []));
-        setLoading(false);
-      })
-      .catch(e => {
-        setError(e.message === 'not_found' ? null : e.message);
-        setLoading(false);
-      });
-  }, [kundeId]);
+    let cancelled = false;
+    let retryCount = 0;
+    const maxRetries = 8;
+
+    if (isOrderView) {
+      // Order view: fetch all lists for this customer
+      const fetchOrder = () => {
+        const url = `${KONAGENT_URL}/api/public/order/${kundeId}?t=${Date.now()}`;
+        fetch(url)
+          .then(res => {
+            if (!res.ok) throw new Error(res.status === 404 ? 'not_found' : `HTTP ${res.status}`);
+            return res.json();
+          })
+          .then(data => {
+            if (cancelled) return;
+            setKundeName(data.kundeName || kundeId);
+            setVertreterName(data.vertreterName || '');
+            const listenWithCatalogs = (data.listen || [])
+              .filter(l => l.artikel && l.artikel.length > 0)
+              .map(l => ({
+                name: l.name,
+                isRestocking: l.isRestocking,
+                prioritaet: l.isRestocking ? 0 : (l.prioritaet ?? 1),
+                geaendert: l.geaendert,
+                catalog: buildCatalog(l.artikel),
+                urlName: l.urlName || null,
+                allowStock: l.allowStock !== false,
+                showInOrder: l.showInOrder !== false,
+              }))
+              .sort((a, b) => b.prioritaet - a.prioritaet);
+            setCatalogs(listenWithCatalogs);
+            // Use first list as primary catalog (for KollektionView compatibility)
+            if (listenWithCatalogs.length > 0) {
+              // Merge all cells for unified cart/search
+              const allArtikel = (data.listen || []).flatMap(l => l.artikel || []);
+              setCatalog(buildCatalog(allArtikel));
+              setGeaendert(listenWithCatalogs[0].geaendert);
+            }
+            setLoading(false);
+          })
+          .catch(e => {
+            if (cancelled) return;
+            if (e.message === 'not_found' && retryCount < maxRetries) {
+              retryCount++;
+              setTimeout(fetchOrder, 3000);
+            } else {
+              setError(e.message === 'not_found' ? null : e.message);
+              setLoading(false);
+            }
+          });
+      };
+      fetchOrder();
+    } else {
+      // Restocking view: fetch only restocking list
+      const fetchList = () => {
+        const url = `${KONAGENT_URL}/api/public/restocking/${kundeId}?t=${Date.now()}`;
+        fetch(url)
+          .then(res => {
+            if (!res.ok) throw new Error(res.status === 404 ? 'not_found' : `HTTP ${res.status}`);
+            return res.json();
+          })
+          .then(data => {
+            if (cancelled) return;
+            setKundeName(data.kundeName || kundeId);
+            setGeaendert(data.geaendert);
+            setVertreterName(data.vertreterName || '');
+            setCatalog(buildCatalog(data.artikel || []));
+            setLoading(false);
+          })
+          .catch(e => {
+            if (cancelled) return;
+            if (e.message === 'not_found' && retryCount < maxRetries) {
+              retryCount++;
+              setTimeout(fetchList, 3000);
+            } else {
+              setError(e.message === 'not_found' ? null : e.message);
+              setLoading(false);
+            }
+          });
+      };
+      fetchList();
+    }
+
+    return () => { cancelled = true; };
+  }, [kundeId, isOrderView]);
 
   // Fetch vertreter kontakte from KonAgent public API
   useEffect(() => {
@@ -767,10 +2226,34 @@ export default function App() {
           item.sku === cell.sku ? { ...item, qty: item.qty + 1 } : item
         );
       }
-      return [...prev, { sku: cell.sku, form: cell.form, qty: 1 }];
+      return [...prev, { sku: cell.sku, form: cell.form, qty: 1, imageId: cell.imageId }];
     });
-    setCartOpen(true);
+    // Warenkorb nur beim ERSTEN Mal öffnen, nicht bei Menge+1
   };
+
+  const handleSetQty = (sku, qty) => {
+    if (qty <= 0) {
+      setCart(prev => prev.filter(item => item.sku !== sku));
+    } else {
+      setCart(prev => prev.map(item => item.sku === sku ? { ...item, qty } : item));
+    }
+  };
+
+  // eslint-disable-next-line
+  const _handleRemoveFromCart = (sku) => {
+    setCart(prev => prev.filter(item => item.sku !== sku));
+  };
+
+  const handleSelectKollektion = (name, listCatalog, allowStock) => {
+    setSelectedKollektion(name);
+    setSelectedListCatalog(listCatalog || catalog);
+    setSelectedListAllowStock(allowStock ?? true);
+  };
+
+  // PIN-Schutz (nach allen Hooks!)
+  if (kundeId && !pinOk) {
+    return <PinScreen kundeId={kundeId} onSuccess={() => setPinOk(true)} />;
+  }
 
   if (loading) return <LoadingScreen />;
   if (!catalog || error) return <NotFound message={error} />;
@@ -779,15 +2262,19 @@ export default function App() {
     return (
       <KollektionView
         kollektion={selectedKollektion}
-        onBack={() => setSelectedKollektion(null)}
-        catalog={catalog}
+        onBack={() => { setSelectedKollektion(null); setSelectedListCatalog(null); }}
+        catalog={selectedListCatalog || catalog}
         kundeName={kundeName}
+        kundeId={kundeId}
         cart={cart}
         onAddCart={handleAddCart}
+        onSetQty={handleSetQty}
         cartOpen={cartOpen}
         onCartOpen={() => setCartOpen(true)}
         onCartClose={() => setCartOpen(false)}
         vertreterKontakt={vertreterKontakt}
+        onOrderComplete={() => setCart([])}
+        allowStock={selectedListAllowStock}
       />
     );
   }
@@ -795,10 +2282,23 @@ export default function App() {
   return (
     <CollectionOverview
       catalog={catalog}
+      catalogs={isOrderView ? catalogs : []}
+      isOrderView={isOrderView}
       kundeName={kundeName}
       geaendert={geaendert}
-      onSelect={setSelectedKollektion}
+      onSelect={handleSelectKollektion}
       vertreterKontakt={vertreterKontakt}
+      deepLinkUrlName={deepLinkUrlName}
+      showAllLists={showAllLists}
+      onShowAll={() => setShowAllLists(true)}
     />
   );
+}
+
+export default function App() {
+  // Routing ohne Hooks (Dispatcher) — verhindert Rules-of-Hooks-Konflikte
+  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/katalogs/')) {
+    return <KatalogApp />;
+  }
+  return <MainApp />;
 }
