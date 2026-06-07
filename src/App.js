@@ -2199,14 +2199,24 @@ function MainApp() {
   const [orderTab, setOrderTab] = useState('listen'); // 'listen' | 'stocks'
   const [stockLager, setStockLager] = useState([]); // [{id,name,persisted,slug}]
 
+  const _path = window.location.pathname;
+  const isOrderView = _path.startsWith('/order/');
+  // Beleg-Ansicht: /beleg/{belegId}?c={kundeId} — zeigt die Artikel eines Belegs LIVE
+  // als (flüchtige) Liste; über „more" sind die übrigen Kunden-Listen erreichbar.
+  const isBelegView = _path.startsWith('/beleg/');
+  const belegId = isBelegView ? (_path.match(/\/beleg\/([^/]+)/)?.[1] || null) : null;
+
   const kundeId = (() => {
-    const m = window.location.pathname.match(/\/(restocking|order)\/([^/]+)/);
+    if (isBelegView) return new URLSearchParams(window.location.search).get('c');
+    const m = _path.match(/\/(restocking|order)\/([^/]+)/);
     return m ? m[2] : null;
   })();
-  const isOrderView = window.location.pathname.startsWith('/order/');
 
-  // Deep-link: ?ListenName in query string → show that list first
+  // Deep-link: ?ListenName in query string → show that list first.
+  // Im Beleg-Modus ist der synthetische Eintrag `beleg-{id}` der Deep-Link → er steht oben,
+  // „more" enthüllt die anderen Listen.
   const deepLinkUrlName = (() => {
+    if (isBelegView) return belegId ? `beleg-${belegId}` : null;
     const search = window.location.search;
     if (!search || search.length < 2) return null;
     // The urlName is the query string without the leading '?', e.g. ?summer-vibes → "summer-vibes"
@@ -2220,7 +2230,7 @@ function MainApp() {
 
   useEffect(() => {
     if (!kundeId) {
-      setError('Keine Kunden-ID in der URL gefunden. Erwartet: /restocking/{kundeId} oder /order/{kundeId}');
+      setError('Keine Kunden-ID in der URL gefunden. Erwartet: /restocking/{kundeId}, /order/{kundeId} oder /beleg/{belegId}?c={kundeId}');
       setLoading(false);
       return;
     }
@@ -2229,7 +2239,60 @@ function MainApp() {
     let retryCount = 0;
     const maxRetries = 8;
 
-    if (isOrderView) {
+    if (isBelegView) {
+      // Beleg-Ansicht: Beleg-Positionen LIVE laden (nicht persistiert) + die übrigen Listen
+      // des Kunden, damit „more" sie zeigt. Der Beleg ist der Deep-Link (steht oben).
+      const fetchBeleg = () => {
+        Promise.all([
+          fetch(`${KONAGENT_URL}/api/public/beleg-artikel/${belegId}?c=${kundeId}&t=${Date.now()}`)
+            .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); }),
+          fetch(`${KONAGENT_URL}/api/public/order/${kundeId}?t=${Date.now()}`)
+            .then(res => res.ok ? res.json() : { listen: [] })
+            .catch(() => ({ listen: [] })),
+        ])
+          .then(([belegData, orderData]) => {
+            if (cancelled) return;
+            setKundeName(belegData.kundeName || orderData.kundeName || kundeId);
+            setVertreterName(belegData.vertreterName || orderData.vertreterName || '');
+            const belegArtikel = belegData.artikel || [];
+            const belegEntry = {
+              name: belegData.name || `Beleg ${belegId}`,
+              isRestocking: false,
+              prioritaet: 9999,
+              geaendert: null,
+              catalog: buildCatalog(belegArtikel),
+              urlName: `beleg-${belegId}`,
+              allowStock: true,
+              showInOrder: true,
+            };
+            const otherLists = (orderData.listen || [])
+              .filter(l => l.artikel && l.artikel.length > 0)
+              .map(l => ({
+                name: l.name,
+                isRestocking: l.isRestocking,
+                prioritaet: l.isRestocking ? 0 : (l.prioritaet ?? 1),
+                geaendert: l.geaendert,
+                catalog: buildCatalog(l.artikel),
+                urlName: l.urlName || null,
+                allowStock: l.allowStock !== false,
+                showInOrder: l.showInOrder !== false,
+              }))
+              .sort((a, b) => b.prioritaet - a.prioritaet);
+            setCatalogs([belegEntry, ...otherLists]);
+            // Merged catalog für einheitlichen Warenkorb/Suche
+            const merged = [belegArtikel, ...(orderData.listen || []).flatMap(l => l.artikel || [])].flat();
+            setCatalog(buildCatalog(merged.length ? merged : belegArtikel));
+            setGeaendert(null);
+            setLoading(false);
+          })
+          .catch(e => {
+            if (cancelled) return;
+            setError(e.message);
+            setLoading(false);
+          });
+      };
+      fetchBeleg();
+    } else if (isOrderView) {
       // Order view: fetch all lists for this customer
       const fetchOrder = () => {
         const url = `${KONAGENT_URL}/api/public/order/${kundeId}?t=${Date.now()}`;
@@ -2309,7 +2372,7 @@ function MainApp() {
     }
 
     return () => { cancelled = true; };
-  }, [kundeId, isOrderView]);
+  }, [kundeId, isOrderView, isBelegView, belegId]);
 
   // Fetch vertreter kontakte from KonAgent public API
   useEffect(() => {
@@ -2446,8 +2509,8 @@ function MainApp() {
   return (
     <CollectionOverview
       catalog={catalog}
-      catalogs={isOrderView ? catalogs : []}
-      isOrderView={isOrderView}
+      catalogs={(isOrderView || isBelegView) ? catalogs : []}
+      isOrderView={isOrderView || isBelegView}
       kundeName={kundeName}
       geaendert={geaendert}
       onSelect={handleSelectKollektion}
