@@ -2068,6 +2068,93 @@ function KatalogApp() {
   );
 }
 
+// ─── Order: Stocks-Tab (zugeordnete Läger) ────────────────────────────────────
+
+function StocksView({ lager, kundeId, kundeName, onSelectKollektion }) {
+  const [expanded, setExpanded] = useState(null);
+  const [catalogs, setCatalogs] = useState({});
+  const [loadingName, setLoadingName] = useState(null);
+  const [errors, setErrors] = useState({});
+
+  const openLive = async (l) => {
+    if (expanded === l.name) { setExpanded(null); return; }
+    setExpanded(l.name);
+    if (!catalogs[l.name]) {
+      setLoadingName(l.name);
+      try {
+        const r = await fetch(`${KONAGENT_URL}/api/public/katalog/${kundeId}?lager=${encodeURIComponent(l.name)}&t=${Date.now()}`);
+        if (!r.ok) throw new Error(`Fehler ${r.status}`);
+        const d = await r.json();
+        setCatalogs(prev => ({ ...prev, [l.name]: buildCatalog(d.artikel || []) }));
+      } catch (e) {
+        setErrors(prev => ({ ...prev, [l.name]: e.message || 'Laden fehlgeschlagen' }));
+      } finally { setLoadingName(null); }
+    }
+  };
+
+  return (
+    <main className="max-w-6xl mx-auto px-4 py-6">
+      {lager.length === 0 && <p className="text-sm text-champagne-500 text-center py-10">Dir sind keine Läger zugeordnet.</p>}
+      <div className="space-y-4">
+        {lager.map(l => l.persisted ? (
+          <a
+            key={l.name}
+            href={`${KONAGENT_URL}/lager/${l.slug}?kunde=${kundeId}`}
+            target="_blank" rel="noreferrer"
+            className="flex items-center gap-3 p-4 rounded-2xl bg-white border border-champagne-100/80 hover:border-champagne-300 hover:shadow-sm transition-all"
+          >
+            <div className="w-12 h-12 rounded-xl bg-champagne-100 flex items-center justify-center text-champagne-500 shrink-0">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 9l9-6 9 6v11a1 1 0 01-1 1H4a1 1 0 01-1-1z"/><path d="M9 21V12h6v9"/></svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-display text-base text-champagne-800 truncate">{l.name}</p>
+              <p className="text-[11px] text-champagne-400">Statisches Lager · öffnen</p>
+            </div>
+            <span className="text-champagne-400 text-sm shrink-0">↗</span>
+          </a>
+        ) : (
+          <div key={l.name} className="rounded-2xl bg-white border border-champagne-100/80 overflow-hidden">
+            <button onClick={() => openLive(l)} className="w-full flex items-center gap-3 p-4 text-left hover:bg-champagne-50/50 transition-colors">
+              <div className="w-12 h-12 rounded-xl bg-champagne-100 flex items-center justify-center text-champagne-500 shrink-0">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 9l9-6 9 6v11a1 1 0 01-1 1H4a1 1 0 01-1-1z"/><path d="M9 21V12h6v9"/></svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-display text-base text-champagne-800 truncate">{l.name}</p>
+                <p className="text-[11px] text-champagne-400">Lager · {expanded === l.name ? 'zuklappen' : 'aufklappen'}</p>
+              </div>
+              <span className="text-champagne-400 shrink-0">{expanded === l.name ? '▲' : '▼'}</span>
+            </button>
+            {expanded === l.name && (
+              <div className="border-t border-champagne-100/60 p-4">
+                {loadingName === l.name ? (
+                  <div className="flex items-center justify-center gap-2 py-6 text-champagne-500 text-sm"><div className="w-4 h-4 border-2 border-champagne-300 border-t-transparent rounded-full animate-spin"></div> Lager wird geladen…</div>
+                ) : errors[l.name] ? (
+                  <p className="text-center text-red-500 text-sm py-4">{errors[l.name]}</p>
+                ) : catalogs[l.name] ? (
+                  <>
+                    <p className="text-xs text-champagne-500 mb-3">{catalogs[l.name].cells.length} Artikel · {catalogs[l.name].kollektionen.length} Kollektionen</p>
+                    <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
+                      {catalogs[l.name].kollektionen.map(k => (
+                        <KollektionCard
+                          key={k}
+                          name={k}
+                          preview={catalogs[l.name].kollektionTopPreviews?.[k] || catalogs[l.name].kollektionPreviews?.[k]}
+                          onClick={(name) => onSelectKollektion(name, catalogs[l.name], true)}
+                          byKollektion={catalogs[l.name].byKollektion}
+                        />
+                      ))}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </main>
+  );
+}
+
 function MainApp() {
   const [catalog, setCatalog] = useState(null);
   const [catalogs, setCatalogs] = useState([]); // multi-list: [{name, catalog, geaendert}]
@@ -2083,6 +2170,8 @@ function MainApp() {
   const [vertreterKontakt, setVertreterKontakt] = useState(null);
   const [vertreterName, setVertreterName] = useState('');
   const [showAllLists, setShowAllLists] = useState(false);
+  const [orderTab, setOrderTab] = useState('listen'); // 'listen' | 'stocks'
+  const [stockLager, setStockLager] = useState([]); // [{id,name,persisted,slug}]
 
   const kundeId = (() => {
     const m = window.location.pathname.match(/\/(restocking|order)\/([^/]+)/);
@@ -2244,6 +2333,17 @@ function MainApp() {
     setCart(prev => prev.filter(item => item.sku !== sku));
   };
 
+  // Zugeordnete Läger laden (nur Order-View, nach PIN)
+  useEffect(() => {
+    if (!isOrderView || !kundeId || !pinOk) return;
+    let cancelled = false;
+    fetch(`${KONAGENT_URL}/api/public/katalog-lager/${kundeId}?t=${Date.now()}`)
+      .then(r => r.ok ? r.json() : { lager: [] })
+      .then(d => { if (!cancelled) setStockLager(d.lager || []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isOrderView, kundeId, pinOk]);
+
   const handleSelectKollektion = (name, listCatalog, allowStock) => {
     setSelectedKollektion(name);
     setSelectedListCatalog(listCatalog || catalog);
@@ -2276,6 +2376,44 @@ function MainApp() {
         onOrderComplete={() => setCart([])}
         allowStock={selectedListAllowStock}
       />
+    );
+  }
+
+  const hasStocks = isOrderView && stockLager.length > 0;
+
+  if (hasStocks) {
+    return (
+      <div className="min-h-screen bg-[#faf9f6]">
+        {/* Tab-Leiste Listen / Stocks */}
+        <div className="glass border-b border-champagne-200/40 sticky top-0 z-40">
+          <div className="max-w-6xl mx-auto px-4 flex gap-1">
+            <button
+              onClick={() => setOrderTab('listen')}
+              className={`px-5 py-3 text-sm font-semibold border-b-2 transition-colors ${orderTab === 'listen' ? 'border-champagne-700 text-champagne-800' : 'border-transparent text-champagne-400 hover:text-champagne-600'}`}
+            >Listen</button>
+            <button
+              onClick={() => setOrderTab('stocks')}
+              className={`px-5 py-3 text-sm font-semibold border-b-2 transition-colors ${orderTab === 'stocks' ? 'border-champagne-700 text-champagne-800' : 'border-transparent text-champagne-400 hover:text-champagne-600'}`}
+            >Stocks <span className="text-[11px] text-champagne-400">({stockLager.length})</span></button>
+          </div>
+        </div>
+        {orderTab === 'listen' ? (
+          <CollectionOverview
+            catalog={catalog}
+            catalogs={catalogs}
+            isOrderView={isOrderView}
+            kundeName={kundeName}
+            geaendert={geaendert}
+            onSelect={handleSelectKollektion}
+            vertreterKontakt={vertreterKontakt}
+            deepLinkUrlName={deepLinkUrlName}
+            showAllLists={showAllLists}
+            onShowAll={() => setShowAllLists(true)}
+          />
+        ) : (
+          <StocksView lager={stockLager} kundeId={kundeId} kundeName={kundeName} onSelectKollektion={handleSelectKollektion} />
+        )}
+      </div>
     );
   }
 
