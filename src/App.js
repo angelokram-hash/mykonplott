@@ -650,6 +650,7 @@ function CartView({ cartItems, onClose, vertreterKontakt, kundeName, kundeId, on
   const [orderConfirm, setOrderConfirm] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(null); // { id, datum }
   const [orderError, setOrderError] = useState('');
+  const [notiz, setNotiz] = useState(''); // Bemerkung zur Bestellung
   // Liste speichern
   const [listName, setListName] = useState('');
   const [savingList, setSavingList] = useState(false);
@@ -721,7 +722,7 @@ function CartView({ cartItems, onClose, vertreterKontakt, kundeName, kundeId, on
       const res = await fetch(`${KONAGENT_URL}/api/public/bestellung`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kundeId, kundeName, artikel }),
+        body: JSON.stringify({ kundeId, kundeName, artikel, notiz: notiz.trim() || undefined }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -892,6 +893,14 @@ function CartView({ cartItems, onClose, vertreterKontakt, kundeName, kundeId, on
                 {totalItems} Artikel verbindlich bestellen?
               </p>
               <p className="text-xs text-orange-600 text-center">Diese Bestellung wird an KONPLOTT übermittelt.</p>
+              <textarea
+                value={notiz}
+                onChange={(e) => setNotiz(e.target.value)}
+                disabled={ordering}
+                rows={2}
+                placeholder="Bemerkung (optional) – z. B. Lieferwunsch, Hinweis …"
+                className="w-full rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm text-champagne-800 placeholder-champagne-400 outline-none focus:border-orange-400 resize-y"
+              />
               {orderError && <p className="text-xs text-red-600 text-center">{orderError}</p>}
               <div className="flex gap-2">
                 <button
