@@ -655,6 +655,15 @@ function CartView({ cartItems, onClose, vertreterKontakt, kundeName, kundeId, on
   const [savingList, setSavingList] = useState(false);
   const [listSaved, setListSaved] = useState(false);
   const [listError, setListError] = useState('');
+  // EANs kopieren
+  const [eansCopied, setEansCopied] = useState(false);
+  const handleCopyEans = () => {
+    const text = cartItems.map(i => i.sku).join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+      setEansCopied(true);
+      setTimeout(() => setEansCopied(false), 2000);
+    }).catch(() => {});
+  };
 
   const handleSaveListClick = async () => {
     const name = listName.trim();
@@ -821,6 +830,23 @@ function CartView({ cartItems, onClose, vertreterKontakt, kundeName, kundeId, on
         </div>
 
         <div className="sticky bottom-0 bg-white border-t border-champagne-200/40 p-3 space-y-1.5">
+          {/* ── EANs kopieren ── */}
+          <button
+            onClick={handleCopyEans}
+            className="w-full px-4 py-2 rounded-xl bg-champagne-100 text-champagne-700 text-[13px] font-semibold hover:bg-champagne-200 border border-champagne-200/60 transition-all flex items-center justify-center gap-2"
+          >
+            {eansCopied ? (
+              <>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                EANs kopiert
+              </>
+            ) : (
+              <>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                EANs kopieren
+              </>
+            )}
+          </button>
           {/* ── Als Liste speichern ── */}
           {onSaveList && (
             <div className="bg-champagne-50 border border-champagne-200/60 rounded-xl p-2.5 mb-1">
