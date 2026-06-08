@@ -1330,10 +1330,11 @@ function MediaView({ media, muted, onToggleMute, rounded = 'rounded-2xl', height
       </div>
     );
   }
-  if (media.type === 'image' && media.imageId) {
+  const imgSrc = media.type === 'image' ? (media.url || heroImg(media.imageId)) : null;
+  if (imgSrc) {
     return (
       <div className={`w-full ${heightClass} overflow-hidden ${rounded} bg-champagne-100`}>
-        <img src={heroImg(media.imageId)} alt="" className="w-full h-full object-cover" />
+        <img src={imgSrc} alt="" className="w-full h-full object-cover" />
       </div>
     );
   }
@@ -1342,10 +1343,28 @@ function MediaView({ media, muted, onToggleMute, rounded = 'rounded-2xl', height
 
 function HeroSection({ hero, kundeName, vertreterKontakt }) {
   const [muted, setMuted] = useState(true);
+  const hideKey = `heroHidden:${kundeName}`;
+  const [hidden, setHidden] = useState(() => {
+    try { return localStorage.getItem(hideKey) === '1'; } catch { return false; }
+  });
   if (!hero || !hero.aktiv) return null;
   const desktop = hero.desktop || hero.mobile;
   const mobile = hero.mobile || hero.desktop;
   if (!desktop && !mobile) return null;
+
+  if (hidden) {
+    return (
+      <div className="max-w-6xl mx-auto px-4 pt-3 -mb-2">
+        <button
+          onClick={() => { try { localStorage.removeItem(hideKey); } catch {} setHidden(false); }}
+          className="inline-flex items-center gap-1.5 text-[11px] font-medium text-champagne-400 hover:text-champagne-700 transition"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          Hero anzeigen
+        </button>
+      </div>
+    );
+  }
   const hasVideo = desktop?.type === 'vimeo' || mobile?.type === 'vimeo';
   const toggle = hasVideo ? () => setMuted(m => !m) : null;
   const wa = vertreterKontakt?.whatsapp ? `https://wa.me/${vertreterKontakt.whatsapp.replace(/[^0-9+]/g, '')}` : null;
@@ -1363,6 +1382,15 @@ function HeroSection({ hero, kundeName, vertreterKontakt }) {
 
         {/* Verlauf für Lesbarkeit */}
         <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-b from-black/45 via-black/5 to-black/55" />
+
+        {/* Ausblenden */}
+        <button
+          onClick={() => { try { localStorage.setItem(hideKey, '1'); } catch {} setHidden(true); }}
+          className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full bg-black/40 backdrop-blur text-white flex items-center justify-center hover:bg-black/60 transition"
+          title="Hero ausblenden"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
 
         {/* Oben: ovales Logo + „Konplott & {Kunde}" */}
         <div className="absolute top-0 left-0 right-0 p-5 flex items-center gap-3">
