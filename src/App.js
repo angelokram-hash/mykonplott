@@ -1269,7 +1269,172 @@ function VertreterHeader({ vertreterKontakt }) {
   );
 }
 
-function ListSection({ name, isRestocking, catalog: listCatalog, geaendert, onSelect, allowStock }) {
+// ─── Hero & Banner (Order-Seite) ──────────────────────────────────────────────
+
+function heroImg(id, w = 1280) {
+  if (!id) return null;
+  return `${CDN_BASE}/${id}/${id}.jpg?width=${w}`;
+}
+
+function vimeoSrc(id, muted) {
+  return `https://player.vimeo.com/video/${id}?autoplay=1&loop=1&muted=${muted ? 1 : 0}&controls=0&playsinline=1&autopause=0&title=0&byline=0&portrait=0`;
+}
+
+// Sehr einfaches, sicheres Format: **fett** + Zeilenumbrüche. Kein roh-HTML.
+function StyledText({ text, className }) {
+  if (!text) return null;
+  return (
+    <div className={className}>
+      {text.split('\n').map((line, i) => {
+        if (!line.trim()) return <div key={i} className="h-2" />;
+        const parts = line.split(/(\*\*[^*]+\*\*)/g);
+        return (
+          <p key={i}>
+            {parts.map((p, j) =>
+              p.startsWith('**') && p.endsWith('**')
+                ? <strong key={j}>{p.slice(2, -2)}</strong>
+                : <span key={j}>{p}</span>
+            )}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function MediaView({ media, muted, onToggleMute, rounded = 'rounded-2xl', heightClass = 'h-full' }) {
+  if (!media) return null;
+  if (media.type === 'vimeo' && media.vimeoId) {
+    return (
+      <div className={`relative w-full ${heightClass} overflow-hidden ${rounded} bg-black`}>
+        <iframe
+          title="Video"
+          src={vimeoSrc(media.vimeoId, muted)}
+          className="absolute inset-0 w-full h-full"
+          style={{ border: 0 }}
+          allow="autoplay; fullscreen; picture-in-picture"
+        />
+        {onToggleMute && (
+          <button
+            onClick={onToggleMute}
+            className="absolute bottom-3 right-3 z-20 w-10 h-10 rounded-full bg-black/50 backdrop-blur text-white flex items-center justify-center hover:bg-black/70 transition"
+            title={muted ? 'Ton an' : 'Ton aus'}
+          >
+            {muted ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 010 7.07M19.07 4.93a10 10 0 010 14.14"/></svg>
+            )}
+          </button>
+        )}
+      </div>
+    );
+  }
+  if (media.type === 'image' && media.imageId) {
+    return (
+      <div className={`w-full ${heightClass} overflow-hidden ${rounded} bg-champagne-100`}>
+        <img src={heroImg(media.imageId)} alt="" className="w-full h-full object-cover" />
+      </div>
+    );
+  }
+  return null;
+}
+
+function HeroSection({ hero, kundeName, vertreterKontakt }) {
+  const [muted, setMuted] = useState(true);
+  if (!hero || !hero.aktiv) return null;
+  const desktop = hero.desktop || hero.mobile;
+  const mobile = hero.mobile || hero.desktop;
+  if (!desktop && !mobile) return null;
+  const hasVideo = desktop?.type === 'vimeo' || mobile?.type === 'vimeo';
+  const toggle = hasVideo ? () => setMuted(m => !m) : null;
+  const wa = vertreterKontakt?.whatsapp ? `https://wa.me/${vertreterKontakt.whatsapp.replace(/[^0-9+]/g, '')}` : null;
+  const mail = vertreterKontakt?.email ? `mailto:${vertreterKontakt.email}` : null;
+
+  return (
+    <div className="max-w-6xl mx-auto px-4 pt-4">
+      <div className="relative">
+        <div className="hidden sm:block">
+          <MediaView media={desktop} muted={muted} onToggleMute={toggle} heightClass="h-[300px] md:h-[420px]" />
+        </div>
+        <div className="sm:hidden">
+          <MediaView media={mobile} muted={muted} onToggleMute={toggle} heightClass="h-[460px]" />
+        </div>
+
+        {/* Verlauf für Lesbarkeit */}
+        <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-b from-black/45 via-black/5 to-black/55" />
+
+        {/* Oben: ovales Logo + „Konplott & {Kunde}" */}
+        <div className="absolute top-0 left-0 right-0 p-5 flex items-center gap-3">
+          <img src="/konplott-logo-oval.svg" alt="" className="w-9 sm:w-11 h-auto drop-shadow-lg brightness-0 invert opacity-95" />
+          <h1 className="font-display text-white text-lg sm:text-2xl tracking-wide drop-shadow-lg leading-tight">
+            Konplott &amp; {kundeName}{hero.headlineSuffix ? <span className="opacity-80"> · {hero.headlineSuffix}</span> : null}
+          </h1>
+        </div>
+
+        {/* Unten: Kontakt-CTAs */}
+        {(wa || mail) && (
+          <div className="absolute bottom-0 left-0 right-0 p-4 flex items-center gap-2">
+            {wa && (
+              <a href={wa} target="_blank" rel="noreferrer"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#25D366] text-white text-[13px] font-semibold shadow-lg hover:bg-[#1FAD53] transition">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.272-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.67-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.076 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347M12.05 2C6.527 2 2.05 6.477 2.05 12c0 1.77.46 3.43 1.27 4.87L2.05 22l5.25-1.27A9.93 9.93 0 0012.05 22c5.523 0 10-4.477 10-10S17.573 2 12.05 2z"/></svg>
+                WhatsApp
+              </a>
+            )}
+            {mail && (
+              <a href={mail}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/90 backdrop-blur text-champagne-800 text-[13px] font-semibold shadow-lg hover:bg-white transition">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>
+                E-Mail
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ListBanner({ banner }) {
+  const [muted, setMuted] = useState(true);
+  if (!banner || !banner.aktiv) return null;
+  const desktop = banner.desktop || banner.mobile;
+  const mobile = banner.mobile || banner.desktop;
+  const hasMedia = !!(desktop || mobile);
+  const hasText = !!(banner.styledText && banner.styledText.trim());
+  if (!hasMedia && !hasText) return null;
+  const hasVideo = desktop?.type === 'vimeo' || mobile?.type === 'vimeo';
+  const toggle = hasVideo ? () => setMuted(m => !m) : null;
+
+  return (
+    <div className="mb-5 rounded-2xl overflow-hidden border border-champagne-100/80 bg-white shadow-sm flex flex-col sm:flex-row xl:flex-col">
+      {hasMedia && (
+        <>
+          {/* Mobil-Medium (< sm) */}
+          {mobile && (
+            <div className="sm:hidden">
+              <MediaView media={mobile} muted={muted} onToggleMute={toggle} rounded="rounded-none" heightClass="h-52" />
+            </div>
+          )}
+          {/* Desktop-Medium (sm+): links (sm–lg) bzw. oben (xl) */}
+          {desktop && (
+            <div className="hidden sm:block sm:w-1/2 xl:w-full shrink-0">
+              <MediaView media={desktop} muted={muted} onToggleMute={toggle} rounded="rounded-none" heightClass="h-full min-h-[180px] xl:h-52 xl:min-h-0" />
+            </div>
+          )}
+        </>
+      )}
+      {hasText && (
+        <div className="flex-1 p-5 flex items-center">
+          <StyledText text={banner.styledText} className="text-champagne-800 text-sm sm:text-base leading-relaxed space-y-1" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ListSection({ name, isRestocking, catalog: listCatalog, geaendert, onSelect, allowStock, banner }) {
   const date = geaendert ? new Date(geaendert).toLocaleDateString('de-DE') : null;
   // Wrap onSelect to include list-specific catalog and allowStock
   const handleSelect = (kollName) => onSelect(kollName, listCatalog, allowStock);
@@ -1292,22 +1457,36 @@ function ListSection({ name, isRestocking, catalog: listCatalog, geaendert, onSe
         {listCatalog.kollektionen.length} Kollektion{listCatalog.kollektionen.length !== 1 ? 'en' : ''} &middot; {listCatalog.cells.length} Artikel
         {date && <span> &middot; {date}</span>}
       </p>
-      <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
-        {listCatalog.kollektionen.map(k => (
-          <KollektionCard
-            key={k}
-            name={k}
-            preview={listCatalog.kollektionPreviews[k]}
-            onClick={handleSelect}
-            byKollektion={listCatalog.byKollektion}
-          />
-        ))}
-      </div>
+      {(() => {
+        const grid = (
+          <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+            {listCatalog.kollektionen.map(k => (
+              <KollektionCard
+                key={k}
+                name={k}
+                preview={listCatalog.kollektionPreviews[k]}
+                onClick={handleSelect}
+                byKollektion={listCatalog.byKollektion}
+              />
+            ))}
+          </div>
+        );
+        if (banner && banner.aktiv) {
+          // Breiter Desktop (xl): Banner links, Artikel rechts. Sonst: Banner oben, Artikel darunter.
+          return (
+            <div className="xl:grid xl:grid-cols-[minmax(280px,340px)_1fr] xl:gap-6 xl:items-start">
+              <ListBanner banner={banner} />
+              <div>{grid}</div>
+            </div>
+          );
+        }
+        return grid;
+      })()}
     </div>
   );
 }
 
-function CollectionOverview({ catalog, catalogs, isOrderView, kundeName, geaendert, onSelect, vertreterKontakt, deepLinkUrlName, showAllLists, onShowAll }) {
+function CollectionOverview({ catalog, catalogs, isOrderView, kundeName, geaendert, onSelect, vertreterKontakt, deepLinkUrlName, showAllLists, onShowAll, hero }) {
   const date = geaendert ? new Date(geaendert).toLocaleDateString('de-DE') : null;
   const showMultiList = isOrderView && catalogs && catalogs.length > 0;
 
@@ -1324,6 +1503,7 @@ function CollectionOverview({ catalog, catalogs, isOrderView, kundeName, geaende
 
   return (
     <div className="min-h-screen bg-[#faf9f6]">
+      {hero && <HeroSection hero={hero} kundeName={kundeName} vertreterKontakt={vertreterKontakt} />}
       <header className="glass border-b border-champagne-200/40 px-5 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3 flex-1">
@@ -1352,6 +1532,7 @@ function CollectionOverview({ catalog, catalogs, isOrderView, kundeName, geaende
                 geaendert={deepLinkedList.geaendert}
                 onSelect={onSelect}
                 allowStock={deepLinkedList.allowStock}
+                banner={deepLinkedList.banner}
               />
             )}
 
@@ -1380,6 +1561,7 @@ function CollectionOverview({ catalog, catalogs, isOrderView, kundeName, geaende
                 geaendert={entry.geaendert}
                 onSelect={onSelect}
                 allowStock={entry.allowStock}
+                banner={entry.banner}
               />
             ))}
           </>
@@ -2217,6 +2399,7 @@ function MainApp() {
   const [cartOpen, setCartOpen] = useState(false);
   const [vertreterKontakt, setVertreterKontakt] = useState(null);
   const [vertreterName, setVertreterName] = useState('');
+  const [hero, setHero] = useState(null);
   const [showAllLists, setShowAllLists] = useState(false);
   const [orderTab, setOrderTab] = useState('listen'); // 'listen' | 'stocks'
   const [stockLager, setStockLager] = useState([]); // [{id,name,persisted,slug}]
@@ -2276,6 +2459,7 @@ function MainApp() {
             if (cancelled) return;
             setKundeName(belegData.kundeName || orderData.kundeName || kundeId);
             setVertreterName(belegData.vertreterName || orderData.vertreterName || '');
+            setHero(orderData.hero || null);
             setDisplayCurrency(belegData.waehrung || orderData.waehrung);
             const belegArtikel = belegData.artikel || [];
             const belegEntry = {
@@ -2287,6 +2471,7 @@ function MainApp() {
               urlName: `beleg-${belegId}`,
               allowStock: true,
               showInOrder: true,
+              banner: null,
             };
             const otherLists = (orderData.listen || [])
               .filter(l => l.artikel && l.artikel.length > 0)
@@ -2299,6 +2484,7 @@ function MainApp() {
                 urlName: l.urlName || null,
                 allowStock: l.allowStock !== false,
                 showInOrder: l.showInOrder !== false,
+                banner: l.banner || null,
               }))
               .sort((a, b) => b.prioritaet - a.prioritaet);
             setCatalogs([belegEntry, ...otherLists]);
@@ -2328,6 +2514,7 @@ function MainApp() {
             if (cancelled) return;
             setKundeName(data.kundeName || kundeId);
             setVertreterName(data.vertreterName || '');
+            setHero(data.hero || null);
             setDisplayCurrency(data.waehrung);
             const listenWithCatalogs = (data.listen || [])
               .filter(l => l.artikel && l.artikel.length > 0)
@@ -2340,6 +2527,7 @@ function MainApp() {
                 urlName: l.urlName || null,
                 allowStock: l.allowStock !== false,
                 showInOrder: l.showInOrder !== false,
+                banner: l.banner || null,
               }))
               .sort((a, b) => b.prioritaet - a.prioritaet);
             setCatalogs(listenWithCatalogs);
@@ -2523,6 +2711,7 @@ function MainApp() {
             deepLinkUrlName={deepLinkUrlName}
             showAllLists={showAllLists}
             onShowAll={() => setShowAllLists(true)}
+            hero={hero}
           />
         ) : (
           <StocksView lager={stockLager} kundeId={kundeId} kundeName={kundeName} onSelectKollektion={handleSelectKollektion} />
@@ -2543,6 +2732,7 @@ function MainApp() {
       deepLinkUrlName={deepLinkUrlName}
       showAllLists={showAllLists}
       onShowAll={() => setShowAllLists(true)}
+      hero={hero}
     />
   );
 }
