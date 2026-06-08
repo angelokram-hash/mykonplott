@@ -130,9 +130,21 @@ function imgUrl(id, size) {
 //   return `https://www.konplott.com/go/${ean}`;
 // }
 
+// Anzeige-Währung der aktuellen Kunden-Preisliste (modulweit; pro Seitenaufruf 1 Kunde/1 Währung).
+// Wird beim Laden der Daten aus der API-Antwort (data.waehrung) gesetzt. Default: EUR.
+let DISPLAY_CURRENCY = { iso: 'EUR', locale: 'de-DE' };
+function setDisplayCurrency(waehrung) {
+  const iso = (waehrung && waehrung.isoCode) || 'EUR';
+  DISPLAY_CURRENCY = { iso, locale: iso === 'USD' ? 'en-US' : 'de-DE' };
+}
+
 function fmtPrice(v) {
   if (v == null || v === 0) return null;
-  return 'VK ' + v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+  try {
+    return 'VK ' + new Intl.NumberFormat(DISPLAY_CURRENCY.locale, { style: 'currency', currency: DISPLAY_CURRENCY.iso }).format(v);
+  } catch {
+    return 'VK ' + v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+  }
 }
 
 function buildCatalog(artikel) {
@@ -1966,6 +1978,7 @@ function KatalogApp() {
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(data => {
         if (cancelled) return;
+        setDisplayCurrency(data.waehrung);
         setCatalog(buildCatalog(data.artikel || []));
         setCatalogLoading(false);
       })
@@ -2263,6 +2276,7 @@ function MainApp() {
             if (cancelled) return;
             setKundeName(belegData.kundeName || orderData.kundeName || kundeId);
             setVertreterName(belegData.vertreterName || orderData.vertreterName || '');
+            setDisplayCurrency(belegData.waehrung || orderData.waehrung);
             const belegArtikel = belegData.artikel || [];
             const belegEntry = {
               name: belegData.name || `Beleg ${belegId}`,
@@ -2314,6 +2328,7 @@ function MainApp() {
             if (cancelled) return;
             setKundeName(data.kundeName || kundeId);
             setVertreterName(data.vertreterName || '');
+            setDisplayCurrency(data.waehrung);
             const listenWithCatalogs = (data.listen || [])
               .filter(l => l.artikel && l.artikel.length > 0)
               .map(l => ({
@@ -2363,6 +2378,7 @@ function MainApp() {
             setKundeName(data.kundeName || kundeId);
             setGeaendert(data.geaendert);
             setVertreterName(data.vertreterName || '');
+            setDisplayCurrency(data.waehrung);
             setCatalog(buildCatalog(data.artikel || []));
             setLoading(false);
           })
