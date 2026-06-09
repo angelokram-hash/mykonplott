@@ -672,8 +672,23 @@ function SetComplementsModal({ cell, allCells, onClose, onAddCart, cart, onSetQt
 
 // ─── Cart View Modal ────────────────────────────────────────────────────────
 
-function CartView({ cartItems, onClose, vertreterKontakt, kundeName, kundeId, onSetQty, onRemove, onOrderComplete, allowOrder = true, onSaveList }) {
+function CartView({ cartItems, onClose, vertreterKontakt, kundeName, kundeId, onSetQty, onRemove, onOrderComplete, allowOrder = true, onSaveList, lager }) {
   const [ordering, setOrdering] = useState(false);
+  // Stock-Update for Basket
+  const [stockMap, setStockMap] = useState(null); // { ean: bestand } | null
+  const [stockChecking, setStockChecking] = useState(false);
+  const checkStock = async () => {
+    setStockChecking(true);
+    try {
+      const eans = cartItems.map(i => i.sku);
+      const res = await fetch(`${KONAGENT_URL}/api/public/stock-check`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eans, ...(lager ? { lager } : {}) }),
+      });
+      if (res.ok) setStockMap((await res.json()).bestand || {});
+    } catch { /* ignore */ }
+    finally { setStockChecking(false); }
+  };
   const [orderConfirm, setOrderConfirm] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(null); // { id, datum }
   const [orderError, setOrderError] = useState('');
@@ -833,6 +848,15 @@ function CartView({ cartItems, onClose, vertreterKontakt, kundeName, kundeId, on
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-champagne-800 text-sm truncate">{item.form}</p>
                   <p className="text-xs text-champagne-500 font-mono">Art.-Nr. {item.sku}</p>
+                  {stockMap && (() => {
+                    const b = stockMap[item.sku] ?? 0;
+                    const ok = b >= item.qty;
+                    return (
+                      <p className={`text-[11px] font-semibold mt-0.5 ${b === 0 ? 'text-red-500' : ok ? 'text-green-600' : 'text-amber-600'}`}>
+                        {b === 0 ? '✗ nicht verfügbar' : ok ? `✓ ${b} auf Lager` : `⚠ nur ${b} auf Lager`}
+                      </p>
+                    );
+                  })()}
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   <button
@@ -858,6 +882,21 @@ function CartView({ cartItems, onClose, vertreterKontakt, kundeName, kundeId, on
         </div>
 
         <div className="sticky bottom-0 bg-white border-t border-champagne-200/40 p-3 space-y-1.5">
+          {/* ── Stock update for Basket ── */}
+          <button
+            onClick={checkStock}
+            disabled={stockChecking}
+            className="w-full px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 text-[13px] font-semibold hover:bg-emerald-100 border border-emerald-200/60 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+          >
+            {stockChecking ? (
+              <><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"/></svg> Bestand wird geprüft…</>
+            ) : (
+              <>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 11-6.219-8.56"/><polyline points="21 3 21 9 15 9"/></svg>
+                {stockMap ? 'Stock erneut prüfen' : 'Stock update for Basket'}
+              </>
+            )}
+          </button>
           {/* ── EANs kopieren ── */}
           <button
             onClick={handleCopyEans}
@@ -2308,6 +2347,7 @@ function KatalogApp() {
             onOrderComplete={() => {}}
             allowOrder={false}
             onSaveList={handleSaveList}
+            lager={selectedLager?.name}
           />
         )}
       </>
@@ -2344,6 +2384,7 @@ function KatalogApp() {
           onOrderComplete={() => {}}
           allowOrder={false}
           onSaveList={handleSaveList}
+          lager={selectedLager?.name}
         />
       )}
       {/* Floating Cart Button (mobil) */}
