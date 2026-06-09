@@ -147,6 +147,20 @@ function fmtPrice(v) {
   }
 }
 
+// Geldbetrag ohne „VK"-Präfix (für Summen).
+function fmtMoney(v) {
+  const n = Number(v) || 0;
+  try {
+    return new Intl.NumberFormat(DISPLAY_CURRENCY.locale, { style: 'currency', currency: DISPLAY_CURRENCY.iso }).format(n);
+  } catch {
+    return n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+  }
+}
+// Summe (Anzahl × Preis) über eine Zellen-Liste.
+function summeCells(cells) {
+  return (cells || []).reduce((s, c) => s + (Number(c.bestand) || 0) * (Number(c.price) || 0), 0);
+}
+
 function buildCatalog(artikel) {
   // Deduplicate by EAN — keep first occurrence
   const seenEan = new Set();
@@ -163,6 +177,7 @@ function buildCatalog(artikel) {
     subkollektion: (a.subKollektionsName || '—').trim(),
     bezeichnung: a.bezeichnung || '',
     price: a.verkaufspreiBrutto,
+    bestand: Number(a.bestand) || 0,
     imageId: a.vorschaubildId,
     images: a.vorschaubildId ? [a.vorschaubildId] : [],
   }));
@@ -1775,7 +1790,7 @@ function SetComplementsAllModal({ cells, allCells, onClose, onAddCart, cart, onS
 
 // ─── Katalog: Die N teuersten Artikel ─────────────────────────────────────────
 
-function KatalogTeuerste({ cells, allCells, lager, cart, onAddCart, onSetQty, defaultCount = 50 }) {
+function KatalogTeuerste({ cells, allCells, lager, cart, onAddCart, onSetQty, defaultCount = 50, showQty = false }) {
   const [count, setCount] = useState(defaultCount);
   const [complementCell, setComplementCell] = useState(null);
   const [showAll, setShowAll] = useState(false);
@@ -1806,6 +1821,13 @@ function KatalogTeuerste({ cells, allCells, lager, cart, onAddCart, onSetQty, de
         </button>
       </div>
 
+      {showQty && (
+        <div className="mb-3 px-3.5 py-2 rounded-xl bg-champagne-100/60 border border-champagne-200/60 text-[13px] text-champagne-800 font-semibold flex items-center justify-between">
+          <span>{top.reduce((s, c) => s + (Number(c.bestand) || 0), 0)} Stk angezeigt</span>
+          <span>Σ {fmtMoney(summeCells(top))}</span>
+        </div>
+      )}
+
       <div className="grid gap-2">
         {top.map((cell, idx) => {
           const inCart = cart?.find(item => item.sku === cell.sku);
@@ -1820,6 +1842,7 @@ function KatalogTeuerste({ cells, allCells, lager, cart, onAddCart, onSetQty, de
                 <p className="text-xs text-champagne-500 truncate">{cell.subkollektion}</p>
                 <p className="text-[10px] text-champagne-400 font-mono">{cell.sku}</p>
                 {fmtPrice(cell.price) && <p className="text-sm font-bold text-champagne-700 mt-0.5">{fmtPrice(cell.price)}</p>}
+                {showQty && <p className="text-[11px] text-champagne-600 font-semibold mt-0.5">Bestand {cell.bestand || 0} &middot; Σ {fmtMoney((Number(cell.bestand) || 0) * (Number(cell.price) || 0))}</p>}
               </div>
               <div className="flex flex-col gap-1.5 shrink-0">
                 <button
@@ -1952,7 +1975,7 @@ function SetansichtView({ cells, cart, onAddCart, onSetQty }) {
 
 // ─── Katalog: Kollektion-Detail (Alle / Setansicht) ───────────────────────────
 
-function KatalogKollektionDetail({ kollektion, cells, allCells, lager, onBack, cart, onAddCart, onSetQty, onCartOpen }) {
+function KatalogKollektionDetail({ kollektion, cells, allCells, lager, onBack, cart, onAddCart, onSetQty, onCartOpen, showQty = false }) {
   const [view, setView] = useState('alle'); // 'alle' | 'set'
   return (
     <div className="min-h-screen bg-[#faf9f6]">
@@ -1980,7 +2003,7 @@ function KatalogKollektionDetail({ kollektion, cells, allCells, lager, onBack, c
       </header>
       <main className="max-w-6xl mx-auto px-4 py-6">
         {view === 'alle' ? (
-          <KatalogTeuerste cells={cells} allCells={allCells} lager={lager} cart={cart} onAddCart={onAddCart} onSetQty={onSetQty} defaultCount={-1} />
+          <KatalogTeuerste cells={cells} allCells={allCells} lager={lager} cart={cart} onAddCart={onAddCart} onSetQty={onSetQty} defaultCount={-1} showQty={showQty} />
         ) : (
           <SetansichtView cells={cells} cart={cart} onAddCart={onAddCart} onSetQty={onSetQty} />
         )}
@@ -1991,10 +2014,12 @@ function KatalogKollektionDetail({ kollektion, cells, allCells, lager, onBack, c
 
 // ─── Katalog: Übersicht (Kollektionen / Teuerste) ─────────────────────────────
 
-function KatalogKollektionCard({ name, preview, onClick, byKollektion }) {
+function KatalogKollektionCard({ name, preview, onClick, byKollektion, showQty = false }) {
   const kcells = byKollektion[name] || [];
   const total = kcells.length;
   const forms = new Set(kcells.map(c => c.form)).size;
+  const kollStueck = showQty ? kcells.reduce((s, c) => s + (Number(c.bestand) || 0), 0) : 0;
+  const kollSumme = showQty ? summeCells(kcells) : 0;
   return (
     <div className="group relative rounded-2xl overflow-hidden hover:shadow-[0_12px_40px_rgba(0,0,0,0.1)] transition-all duration-500 cursor-pointer bg-white border border-champagne-100/80 hover:border-champagne-300/60">
       <button onClick={() => onClick(name)} className="text-left w-full active:scale-[0.98] transition-transform duration-200">
@@ -2012,14 +2037,19 @@ function KatalogKollektionCard({ name, preview, onClick, byKollektion }) {
           <p className="text-[9px] text-champagne-400 leading-tight mt-0.5 font-medium tracking-wide">
             {forms} verschiedene Artikel &middot; {total} Artikel gesamt
           </p>
+          {showQty && (
+            <p className="text-[10px] text-champagne-700 font-semibold leading-tight mt-1">{kollStueck} Stk &middot; Σ {fmtMoney(kollSumme)}</p>
+          )}
         </div>
       </button>
     </div>
   );
 }
 
-function KatalogOverview({ catalog, lager, kundeName, onChangeLager, onSelectKollektion, cart, onCartOpen, onAddCart, onSetQty, multiLager, savedLists = [], onLoadSelektion }) {
+function KatalogOverview({ catalog, lager, kundeName, onChangeLager, onSelectKollektion, cart, onCartOpen, onAddCart, onSetQty, multiLager, savedLists = [], onLoadSelektion, showQty = false }) {
   const [mode, setMode] = useState('kollektionen'); // 'kollektionen' | 'teuerste'
+  const lagerSumme = showQty ? summeCells(catalog.cells) : 0;
+  const lagerStueck = showQty ? catalog.cells.reduce((s, c) => s + (Number(c.bestand) || 0), 0) : 0;
   return (
     <div className="min-h-screen bg-[#faf9f6]">
       <header className="glass border-b border-champagne-200/40 px-5 py-4 sticky top-0 z-40">
@@ -2030,6 +2060,7 @@ function KatalogOverview({ catalog, lager, kundeName, onChangeLager, onSelectKol
               <h1 className="font-display text-lg text-champagne-800 tracking-wide truncate">{kundeName}</h1>
               <p className="text-[11px] text-champagne-500 truncate">
                 <span className="font-semibold">{lager.name}</span> &middot; {catalog.cells.length} Items in {catalog.kollektionen.length} Kollektionen
+                {showQty && <span className="text-champagne-700 font-semibold"> &middot; {lagerStueck} Stk &middot; Σ {fmtMoney(lagerSumme)}</span>}
               </p>
             </div>
           </div>
@@ -2092,11 +2123,12 @@ function KatalogOverview({ catalog, lager, kundeName, onChangeLager, onSelectKol
                 preview={catalog.kollektionTopPreviews?.[k] || catalog.kollektionPreviews?.[k]}
                 onClick={onSelectKollektion}
                 byKollektion={catalog.byKollektion}
+                showQty={showQty}
               />
             ))}
           </div>
         ) : (
-          <KatalogTeuerste cells={catalog.cells} allCells={catalog.cells} lager={lager.name} cart={cart} onAddCart={onAddCart} onSetQty={onSetQty} />
+          <KatalogTeuerste cells={catalog.cells} allCells={catalog.cells} lager={lager.name} cart={cart} onAddCart={onAddCart} onSetQty={onSetQty} showQty={showQty} />
         )}
       </main>
     </div>
@@ -2262,6 +2294,7 @@ function KatalogApp() {
           onAddCart={handleAddCart}
           onSetQty={handleSetQty}
           onCartOpen={() => setCartOpen(true)}
+          showQty={!!selectedLager.mitAnzahl}
         />
         {cartOpen && (
           <CartView
@@ -2296,6 +2329,7 @@ function KatalogApp() {
         onSetQty={handleSetQty}
         savedLists={savedLists}
         onLoadSelektion={handleLoadSelektion}
+        showQty={!!selectedLager.mitAnzahl}
       />
       {/* Katalog-Modus: Warenkorb dient nur der Selektion (kein verbindliches Bestellen) */}
       {cartOpen && (
