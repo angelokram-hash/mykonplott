@@ -771,7 +771,12 @@ function CartView({ cartItems, onClose, vertreterKontakt, kundeName, kundeId, on
         throw new Error(err.message || 'Bestellung fehlgeschlagen');
       }
       const data = await res.json();
-      setOrderSuccess({ id: data.id, datum: data.datum });
+      setOrderSuccess({
+        id: data.id,
+        datum: data.datum,
+        items: cartItems.reduce((s, i) => s + i.qty, 0),
+        total: cartItems.reduce((s, i) => s + i.qty * (i.price || 0), 0),
+      });
       setOrderConfirm(false);
       if (onOrderComplete) onOrderComplete();
     } catch (e) {
@@ -788,25 +793,35 @@ function CartView({ cartItems, onClose, vertreterKontakt, kundeName, kundeId, on
     return (
       <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50">
         <div className="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl overflow-hidden flex flex-col">
-          <div className="p-8 text-center">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <div className="bg-gradient-to-b from-green-50 to-emerald-50 px-8 pt-8 pb-6 text-center">
+            <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M20 6L9 17l-5-5"/>
               </svg>
             </div>
-            <h2 className="font-display text-xl text-champagne-800 mb-2">Bestellung gesendet!</h2>
-            <p className="text-sm text-champagne-600 mb-4">
-              Deine verbindliche Bestellung wurde erfolgreich übermittelt.
-            </p>
-            <div className="bg-champagne-50 rounded-xl p-4 mb-6 text-left space-y-1.5">
+            <h2 className="font-display text-xl text-champagne-800 mb-1.5">Vielen Dank!</h2>
+            <p className="text-sm text-champagne-600">Deine verbindliche Bestellung wurde erfolgreich an KONPLOTT übermittelt.</p>
+          </div>
+          <div className="p-6">
+            <div className="bg-champagne-50 rounded-xl p-4 mb-6 text-left space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-champagne-500">Bestellnr.</span>
+                <span className="font-mono text-xs text-champagne-700">{orderSuccess.id.slice(0, 8)}…</span>
+              </div>
               <div className="flex justify-between text-sm">
                 <span className="text-champagne-500">Datum</span>
                 <span className="font-semibold text-champagne-800">{orderSuccess.datum}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-champagne-500">Bestellnr.</span>
-                <span className="font-mono text-xs text-champagne-700">{orderSuccess.id.slice(0, 8)}…</span>
+                <span className="text-champagne-500">Artikel</span>
+                <span className="font-semibold text-champagne-800">{orderSuccess.items}</span>
               </div>
+              {orderSuccess.total > 0 && (
+                <div className="flex justify-between text-sm pt-2 border-t border-champagne-200/60">
+                  <span className="text-champagne-600 font-semibold">Gesamt</span>
+                  <span className="font-bold text-champagne-800">{fmtMoney(orderSuccess.total)}</span>
+                </div>
+              )}
             </div>
             <button
               onClick={onClose}
@@ -848,6 +863,9 @@ function CartView({ cartItems, onClose, vertreterKontakt, kundeName, kundeId, on
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-champagne-800 text-sm truncate">{item.form}</p>
                   <p className="text-xs text-champagne-500 font-mono">Art.-Nr. {item.sku}</p>
+                  {item.price > 0 && (
+                    <p className="text-xs text-champagne-600 mt-0.5">{fmtMoney(item.price)} × {item.qty} = <span className="font-bold text-champagne-800">{fmtMoney(item.price * item.qty)}</span></p>
+                  )}
                   {stockMap && (() => {
                     const b = stockMap[item.sku] ?? 0;
                     const ok = b >= item.qty;
@@ -882,6 +900,13 @@ function CartView({ cartItems, onClose, vertreterKontakt, kundeName, kundeId, on
         </div>
 
         <div className="sticky bottom-0 bg-white border-t border-champagne-200/40 p-3 space-y-1.5">
+          {/* ── Bestellübersicht (Summe) ── */}
+          {cartItems.some(i => i.price > 0) && (
+            <div className="flex items-center justify-between px-1 pb-2 mb-1 border-b border-champagne-100">
+              <span className="text-[13px] text-champagne-500">{cartItems.reduce((s, i) => s + i.qty, 0)} Artikel &middot; {cartItems.length} Stile</span>
+              <span className="text-[15px] font-bold text-champagne-800">Gesamt {fmtMoney(cartItems.reduce((s, i) => s + i.qty * (i.price || 0), 0))}</span>
+            </div>
+          )}
           {/* ── Stock update for Basket ── */}
           <button
             onClick={checkStock}
@@ -2271,7 +2296,7 @@ function KatalogApp() {
     setCart(prev => {
       const existing = prev.find(item => item.sku === cell.sku);
       if (existing) return prev.map(item => item.sku === cell.sku ? { ...item, qty: item.qty + 1 } : item);
-      return [...prev, { sku: cell.sku, form: cell.form, qty: 1, imageId: cell.imageId }];
+      return [...prev, { sku: cell.sku, form: cell.form, qty: 1, imageId: cell.imageId, price: cell.price || 0 }];
     });
   };
   const handleSetQty = (sku, qty) => {
@@ -2720,7 +2745,7 @@ function MainApp() {
           item.sku === cell.sku ? { ...item, qty: item.qty + 1 } : item
         );
       }
-      return [...prev, { sku: cell.sku, form: cell.form, qty: 1, imageId: cell.imageId }];
+      return [...prev, { sku: cell.sku, form: cell.form, qty: 1, imageId: cell.imageId, price: cell.price || 0 }];
     });
     // Warenkorb nur beim ERSTEN Mal öffnen, nicht bei Menge+1
   };
